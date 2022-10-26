@@ -1,4 +1,4 @@
 #include "cuda_runtime.h"
 
-void test_gemm_(float *a, float *b, float *c, int m, int n, int k);
+void test_gemm_(float *a, float *b,float *c, float *out, int m, int n, int k);
 void test_gemm_1(int *a, int *b, int *c, int m, int n, int k);
