@@ -14,6 +14,8 @@ __global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, DataTy
     const int tidy = threadIdx.y;
     const int bidx = blockIdx.x;
     const int bidy = blockIdx.y;
+    const int b_dimx = blockDim.x;
+
 
     const int data_offset_a = tidx*K;
     const int data_offset_b = tidy*block_size;
@@ -113,52 +115,85 @@ __global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, DataTy
                     temp_score[tidx][i*32+tidy] = temp;
                     sum_scores[tidx][tidy] += temp;
                 }
+                float diff = pre_max_score[tidy] - max_score[tidy];
                 if(tidx < 8){
-                    const int smem_index =  32*8*tidx + tidy*8;
-                    const float diff = exp(pre_max_score[tidy] - max_score[tidy]);
-                    #pragma unroll
-                    for(int i=0;i<8;i+=4){
-                        out_temp[smem_index+i] *= diff;
+                    const int smem_index =  tidy*64 + tidx*8;
+                    if(diff != 0)
+                    {
+                        diff = exp(diff);
+                        #pragma unroll
+                        for(int i=0;i<8;i++){
+                            out_temp[smem_index+i] *= diff;
+                        }
                     }
                 }
 
                 __syncthreads();
 
                 if(tidx == 9){
-                    global_sum_scores[tidy] *= exp(pre_max_score[tidy]-max_score[tidy]);
+                    global_sum_scores[tidy] *= exp(diff);
                     for(int i=0;i<11;i++)
                         global_sum_scores[tidy] += sum_scores[i][tidy];
                 }
             }
 
+            // v0
+            // for(int c_bk=0;c_bk<K/C_BK;c_bk++){
+            //     const int smem_index = tidy*4; // warp_size * 8
+            //     const int global_c_index_i = (smem_index / 32 + b_bn*B_BN + tidx*64);
+            //     const int global_c_index_j = (smem_index % 32 + c_bk*C_BK);
+            //     for(int i=0;i<C_BN;i+=4){
+            //         FLOAT4(smem_c[tidx][smem_index+i]) = FLOAT4(b[global_c_index_i*K+global_c_index_j+i]);
+            //     }
+
+            //     __syncthreads();
+            //     for(int i=0;i<C_BK;i++){
+            //         int temp = i + tidx*2;
+            //         temp = temp < 32 ? temp:temp-32;
+            //         for(int j=0;j<B_BN;j++){
+            //             const int out_global_index_i = tidy;
+            //             const int out_global_index_j = temp + c_bk*C_BK;
+            //             const int index = out_global_index_i*64+out_global_index_j;
+            //             const float score = temp_score[tidx][j*32+tidy];
+
+            //             out_temp[index]  += score*smem_c[tidx][j*32+temp];
+
+            //         }
+            //         if(i&1){
+            //             __syncthreads();
+            //         }
+            //     }
+
+            // }
+
+            // v1
             for(int c_bk=0;c_bk<K/C_BK;c_bk++){
                 const int smem_index = tidy*4; // warp_size * 8
                 const int global_c_index_i = (smem_index / 32 + b_bn*B_BN + tidx*64);
                 const int global_c_index_j = (smem_index % 32 + c_bk*C_BK);
                 for(int i=0;i<C_BN;i+=4){
-                    FLOAT4(smem_c[tidx][smem_index+i]) = FLOAT4(b[global_c_index_i*K+global_c_index_j+i]);
+                    FLOAT4(smem_c[tidx][smem_index+i]) = FLOAT4(c[global_c_index_i*K+global_c_index_j+i]);
                 }
 
                 __syncthreads();
-                for(int i=0;i<C_BK;i++){
-                    int temp = i + tidx*2;
-                    temp = temp < 32 ? temp:temp-32;
-                    for(int j=0;j<B_BN;j++){
-                        const int out_global_index_i = tidy;
-                        const int out_global_index_j = temp + c_bk*C_BK;
-                        const int index = out_global_index_i*64+out_global_index_j;
-                        const float score = temp_score[tidx][j*32+tidy];
+                for(int i = 0;i<32;i += b_dimx){
+                    int threadx = i+b_dimx < 32 ? b_dimx : 32 - i;
 
-                        out_temp[index]  += score*smem_c[tidx][j*32+temp];
-
-                    }
-                    if(i&1){
-                        __syncthreads();
+                    if(tidx < threadx){
+                        for(int j=0;j<44;j++){
+                            const int out_global_index_i = tidx + i;
+                            const int out_global_index_j = tidy + c_bk*C_BK;
+                            const int index = out_global_index_i*64+out_global_index_j;
+                            const float score = temp_score[j/4][(j%4)*32+out_global_index_i];
+                            out_temp[index]  += score*smem_c[j/4][(j%4)*32+tidy];
+                        }
                     }
                 }
+                __syncthreads();
 
             }
         }
+
         if(tidx < 8){
             // const int smem_index =  32*8*tidx + tidy*8; // warp_size * 8
 
@@ -166,6 +201,10 @@ __global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, DataTy
 
             const int index_x = (tidx%4)*8;
             const int index_y = tidy + (tidx/4)*32;
+            // if(tidx == 0 && tidy == 0)
+            //     // for(int i=0;i<32;i++)
+            //         // printf("%.6f ",max_score[i]);
+            //     printf("\n\n%.6f %.6f \n\n",out_temp[8],global_sum_scores[0]);
 
             #pragma unroll
             for(int i=0;i<8;i+=1){

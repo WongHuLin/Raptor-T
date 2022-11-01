@@ -6,7 +6,7 @@
 #include <iomanip>
 void generate_array(float* data, int len){
     for(int i=0;i<len;i++){
-        data[i] = i%10;
+        data[i] = i%100;
     }
 }
 
@@ -18,7 +18,7 @@ bool check_value(type* A,type *B, int len_a, int len_b){
     }
     std::cout<<setiosflags(std::ios::fixed);
     for(int i=0;i<len_a;i++){
-        if(abs(A[i]-B[i])>1e-4){
+        if(abs(A[i]-B[i])>1e-6){
             std::cout<<std::setprecision(2)<<i<<" "<<A[i]<<" "<<B[i]<<" "<<abs(A[i]-B[i])<<std::endl;
             return false;
         }
@@ -63,14 +63,17 @@ int main()
     torch::Tensor out1 = torch::mm(query,key);
     auto max_value = std::get<0>(torch::max(out1,-1)).unsqueeze(1);
     // std::cout<<out1.sizes()<<std::endl;
-    // std::cout<<max_value.sizes()<<std::endl;
+    // std::cout<<max_value<<std::endl;
 
     // auto attn_weights = torch::exp(out1 - max_value);
     auto attn_weights = torch::exp(out1 - max_value);
 
     auto sum_weight = attn_weights.sum(-1);
     // std::cout<<sum_weight.unsqueeze(1).sizes()<<std::endl;
-    torch::Tensor out2 = torch::mm(attn_weights,value)/sum_weight.unsqueeze(1);
+    torch::Tensor out2 = torch::mm(attn_weights,value);
+    std::cout<<out2[0][8]<<std::endl;
+    std::cout<<sum_weight[0]<<std::endl;
+    out2 = out2/sum_weight.unsqueeze(1);
     // std::cout<<out1.index({torch::indexing::Slice(0, 1),"..."})<<std::endl;
     // std::cout<<key.index({"...",torch::indexing::Slice(128,129)})<<std::endl;
     // std::cout<<out2.index({torch::indexing::Slice(0, 64),torch::indexing::Slice(0, 64)})<<std::endl;
