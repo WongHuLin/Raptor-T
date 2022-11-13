@@ -157,9 +157,25 @@ int main()
     generate_array(reinterpret_cast<float*>(key.data_ptr()),seq_len*d_num);
     generate_array(reinterpret_cast<float*>(value.data_ptr()),seq_len*d_num);
 
+
     int block_size = 64,head_num =12;
     int block_num = seq_len/block_size;
     int head_size = d_num / head_num;
+
+    // for(int i =0;i<128;i++){
+    //     std::cout<<reinterpret_cast<float*>(query.data_ptr())[i]<<" ";
+    // }
+    // std::cout<<std::endl;
+
+
+    // query = query.view({block_num,block_size,head_num,d_num/head_num});
+    // query = query.permute({2,0,1,3}).contiguous();
+
+    // for(int i =0;i<128;i++){
+    //     std::cout<<reinterpret_cast<float*>(query.data_ptr())[i]<<" ";
+    // }
+    // std::cout<<std::endl;
+
 
     query = query.reshape({block_num,head_num,block_size,d_num/head_num}).transpose(-2,-1).contiguous().to(at::kCUDA);
     key = key.reshape({block_num,head_num,block_size,d_num/head_num}).to(at::kCUDA);
@@ -201,13 +217,18 @@ int main()
     // query = query.transpose(-2,-1).contiguous().to(at::kCUDA);
 
     // torch::Tensor out1 = torch::bmm(query.reshape({block_num*head_num,block_size,d_num/head_num}),k_out.reshape({block_num*head_num,-1,block_size}).transpose(-2,-1));
+    // // std::cout<<out1.index({torch::indexing::Slice(241, 242),torch::indexing::Slice(0, 1)})<<std::endl;
+    // // std::cout<<query.reshape({block_num*head_num,block_size,d_num/head_num}).index({torch::indexing::Slice(0, 1),torch::indexing::Slice(0, 1),"..."})<<std::endl;
+    // // std::cout<<k_out.reshape({block_num*head_num,-1,block_size}).transpose(-2,-1).index({torch::indexing::Slice(0, 1),"...",torch::indexing::Slice(0, 1)})<<std::endl;
+
+
     // auto max_value = std::get<0>(torch::max(out1,-1)).unsqueeze(-1);
-    // // std::cout<<max_value.sizes()<<std::endl;
+    // // std::cout<<max_value.index({torch::indexing::Slice(0, 1),"...",torch::indexing::Slice(0, 1)})<<std::endl;
 
     // // std::cout<<max_value.sizes()<<std::endl;
     // // // // std::cout<<max_value<<std::endl;
     // // std::cout<<out1.index({torch::indexing::Slice(718, 719),torch::indexing::Slice(0, 1),"..."})<<std::endl;
-    // std::cout<<out1[718][0][0]<<std::endl;
+    // // std::cout<<out1[718][0][0]<<std::endl;
     // auto attn_weights = torch::exp(out1 - max_value);
     // // // auto attn_weights = torch::exp(out1 - max_value);
 
@@ -216,7 +237,9 @@ int main()
     // // std::cout<<attn_weights.sizes()<<" "<<v_out.sizes()<<std::endl;
 
     // torch::Tensor out2 = torch::bmm(attn_weights,v_out.reshape({block_num*head_num,-1,d_num/head_num}));
-    // // std::cout<<out2[718][0][0]<<" "<<sum_weight[718][0]<<std::endl;
+    // std::cout<<sum_weight.index({torch::indexing::Slice(0, 1),"..."})<<std::endl;
+    // // std::cout<<out2[0][0][0]<<" "<<sum_weight[0][0]<<std::endl;
+
     // out2 = out2/sum_weight.unsqueeze(-1);
     // // std::cout<<out2.sizes()<<std::endl;
     // // std::cout<<out2[0][8]<<std::endl;
