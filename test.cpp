@@ -177,7 +177,7 @@ int main()
     // std::cout<<std::endl;
 
 
-    query = query.reshape({block_num,head_num,block_size,d_num/head_num}).transpose(-2,-1).contiguous().to(at::kCUDA);
+    query = query.reshape({block_num,head_num,block_size,d_num/head_num}).to(at::kCUDA);
     key = key.reshape({block_num,head_num,block_size,d_num/head_num}).to(at::kCUDA);
     value = value.reshape({block_num,head_num,block_size,d_num/head_num}).to(at::kCUDA);
     
@@ -191,7 +191,7 @@ int main()
     auto select_index_tensor = torch::from_blob(select_index1.data(),{block_num,head_num,select_len},at::TensorOptions().dtype(torch::kInt)).clone().to(at::kCUDA);
     // std::cout<<select_index_tensor<<std::endl;
 
-    test_gemm_(reinterpret_cast<float*>(query.data_ptr()),reinterpret_cast<float*>(key.data_ptr()),reinterpret_cast<float*>(value.data_ptr()),reinterpret_cast<float*>(out.data_ptr()),reinterpret_cast<int*>(select_index_tensor.data_ptr()),block_num,head_num,block_size,head_size);
+    test_gemm_(reinterpret_cast<float*>(query.transpose(-2,-1).contiguous().data_ptr()),reinterpret_cast<float*>(key.data_ptr()),reinterpret_cast<float*>(value.data_ptr()),reinterpret_cast<float*>(out.data_ptr()),reinterpret_cast<int*>(select_index_tensor.data_ptr()),block_num,head_num,block_size,head_size);
 
     // std::vector<std::vector<int>> select_index;
     // generate_select_index(block_num,head_num,select_len,select_index,ivec);
@@ -214,7 +214,7 @@ int main()
     
 
     // // auto q = ;
-    // query = query.transpose(-2,-1).contiguous().to(at::kCUDA);
+    // query = query.to(at::kCUDA);
 
     // torch::Tensor out1 = torch::bmm(query.reshape({block_num*head_num,block_size,d_num/head_num}),k_out.reshape({block_num*head_num,-1,block_size}).transpose(-2,-1));
     // // std::cout<<out1.index({torch::indexing::Slice(241, 242),torch::indexing::Slice(0, 1)})<<std::endl;
@@ -238,7 +238,7 @@ int main()
 
     // torch::Tensor out2 = torch::bmm(attn_weights,v_out.reshape({block_num*head_num,-1,d_num/head_num}));
     // std::cout<<sum_weight.index({torch::indexing::Slice(0, 1),"..."})<<std::endl;
-    // // std::cout<<out2[0][0][0]<<" "<<sum_weight[0][0]<<std::endl;
+    // std::cout<<out2[0][0][0]<<" "<<sum_weight[0][0]<<std::endl;
 
     // out2 = out2/sum_weight.unsqueeze(-1);
     // // std::cout<<out2.sizes()<<std::endl;

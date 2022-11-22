@@ -3,7 +3,7 @@
 #include "device_launch_parameters.h"
 #include <stdio.h>
 #include <iostream>
-
+#include <cooperative_groups/memcpy_async.h>
 #include <thrust/extrema.h>
 
 #define FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
@@ -53,26 +53,34 @@ __global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, DataTy
     const int C_BN = 4;
 
 
-    __shared__ float smem_a[A_BM*A_BK],smem_b[8][B_BK*B_BN],temp_score[8][A_BM*B_BN],smem_c[8][C_BK*C_BN];
+    __shared__ float smem_q[64][32],smem_k[32][64],temp_score[32][32],smem_v[32][64];
 
-    __shared__ float out_temp[A_BM*64],sum_scores[8][32],global_sum_scores[32],max_values[8][32],pre_max_score[32],max_score[32];
+    __shared__ float out_temp[32][64],global_sum_scores[32],temp_smem[16][32],pre_max_score[32],max_score[32];
 
     float zero4[4] = {0.0f,0.0f,0.0f,0.0f};
 
+    auto block_k = cooperative_groups::this_thread_block();
+    auto block_v = cooperative_groups::this_thread_block();
 
 
     const int block_dim_x = blockDim.x;
 
     for(int a_bm = 0; a_bm< block_size/A_BM; a_bm++){
+        int data_b_start = (select_index[(bidx*g_dimy+bidy)*11+0]*g_dimy +bidy) * block_size * head_size;
+        
+        cooperative_groups::memcpy_async(block_k, smem_k[0], b+data_b_start, sizeof(float)*32*64);
+        cooperative_groups::memcpy_async(block_v, smem_v[0], c+data_b_start, sizeof(float)*32*64);
+
+
         const int smem_index =  32*8*tidy + tidx*8; // warp_size * 8
-        const int global_a_index_i = (smem_index / 32);
+        const int global_a_index_i = (smem_index / 32 );
         const int global_a_index_j = (smem_index % 32 + a_bm*A_BM);
 
-        // 加载Q的部分数据
+        // 加载Q的部分数据,32*64
         #pragma unroll
         for(int i=0;i<8;i+=4){
-            FLOAT4(smem_a[smem_index+i]) = FLOAT4(a[data_offset_a + global_a_index_i*block_size+global_a_index_j+i]); 
-            FLOAT4(out_temp[smem_index+i]) = FLOAT4(zero4[0]);
+            FLOAT4(smem_q[smem_index/32][smem_index % 32+i]) = FLOAT4(a[data_offset_a + global_a_index_i*head_size+global_a_index_j+i]); 
+            FLOAT4(out_temp[smem_index/64][smem_index % 64+i]) = FLOAT4(zero4[0]);
         }
 
         // 初始化sharedmem
@@ -83,125 +91,135 @@ __global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, DataTy
             global_sum_scores[tidx] = 0.0f;
         }
 
-        //遍历K、V的每一个Block进行计算
+        __syncthreads();
+
+        // 遍历K、V的每一个Block进行计算
         for(int block_id=0;block_id<select_block_num;block_id++)
         {
             // 计算KV块的起始位置
             const int data_offset_b = (select_index[(bidx*g_dimy+bidy)*11+block_id]*g_dimy +bidy) * block_size * head_size;
-
-            // KV按照 32*32 的大小进行加载计算
+            
+            // KV按照 32*64 的大小进行加载计算
             for(int b_bn=0;b_bn<block_size/32;b_bn++){
                 
-                #pragma unroll
-                for(int b_bk=0;b_bk<head_size/B_BK;b_bk++){
-                    const int smem_index = tidx*B_BN; // warp_size * 8
-                    const int global_b_index_i = (smem_index / 32 + tidy*4 + b_bn*32);
-                    const int global_b_index_j = (smem_index % 32 + b_bk*B_BK);
-                    // 加载K
-                    #pragma unroll
-                    for(int i=0;i<B_BN;i+=4){
-                        FLOAT4(smem_b[tidy][smem_index+i]) = FLOAT4(b[data_offset_b+global_b_index_i*head_size+global_b_index_j+i]);
+                // 计算Q*K
+                cooperative_groups::wait(block_k);
+                for(int i=0;i<4;i++){
+                    float temp = 0.0f;
+                    for(int j=0;j<64;j++){
+                        temp += smem_q[j][tidx] * smem_k[tidy*4+i][j];
                     }
-
-                    if(b_bk == 0){
-                        for(int i=0;i<B_BN;i+=4){
-                            FLOAT4(temp_score[tidy][smem_index+i]) = FLOAT4(zero4[0]);
-                        }
-                    }
-                    __syncthreads();
-                    
-                    // 计算Q*K
-                    for(int i=0;i<B_BK;i++){
-                        for(int j=0;j<B_BN;j++){
-                            temp_score[tidy][j*32+tidx] += smem_a[(i+b_bk*B_BK)*32+tidx]*smem_b[tidy][j*B_BK+i];
-                        }
-                    }
-                    __syncthreads();
-
+                    temp_score[tidy*4+i][tidx] = temp;
                 }
 
+                //加载下一次使用的数据
+                const int next_block_id = b_bn == 1 ? block_id+1:block_id;
+                const int next_bn = (b_bn + 1) & 1;
+                const int data_b_start = (select_index[(bidx*g_dimy+bidy)*11+next_block_id]*g_dimy +bidy) * block_size * head_size;
+                __syncthreads();
+                if(block_id != select_block_num - 1 || b_bn != 1)
+                {
+                    cooperative_groups::memcpy_async(block_k, smem_k[0], b+data_b_start+next_bn*32*head_size, sizeof(float)*32*64);
+                }
+            
                 //计算最大值 rowmax
                 {
-                    float max_value = 0.0;
-                    #pragma unroll
-                    for(int i=0;i<B_BN;i++){
-                        if(max_value<temp_score[tidy][i*32+tidx]){
-                            max_value = temp_score[tidy][i*32+tidx];
+                    int num = 16;
+                    while(num >= 1)
+                    {
+                        if(num == 16)
+                        {
+                            float value1 = temp_score[tidy][tidx];
+                            float value2 = temp_score[tidy+16][tidx];
+                            float value3 = temp_score[tidy+8][tidx];
+                            float value4 = temp_score[tidy+24][tidx];
+
+                            temp_smem[tidy][tidx] = value1>value2?value1:value2;
+                            temp_smem[tidy+8][tidx] = value3>value4?value3:value4;
                         }
+                        else if(tidy < num){
+                            float value1 = temp_smem[tidy][tidx];
+                            float value2 = temp_smem[tidy+num][tidx];
+                            temp_smem[tidy][tidx] = value1>value2?value1:value2;
+                        }
+                        num = num >> 1;
+                        __syncthreads();
                     }
-                    max_values[tidy][tidx] = max_value;
-                    sum_scores[tidy][tidx] = 0;
-                    if(tidy == 0){
+                    if(tidy == 0)
+                    {
                         pre_max_score[tidx] = max_score[tidx];
-                        #pragma unroll
-                        for(int i=0;i<8;i++){
-                            if(max_score[tidx] < max_values[i][tidx]){
-                                max_score[tidx] = max_values[i][tidx];
-                            }
-                        }
+                        max_score[tidx] = max_score[tidx]>temp_smem[0][tidx]?max_score[tidx]:temp_smem[0][tidx];
                     }
                 }
 
                 //计算差值
+
                 {
                     __syncthreads();
-                    #pragma unroll
-                    for(int i=0;i<B_BN;i++){
-                        float temp =  exp(temp_score[tidy][i*32+tidx] - max_score[tidx]);
-                        temp_score[tidy][i*32+tidx] = temp;
-                        sum_scores[tidy][tidx] += temp;
-                    }
-                    float diff = pre_max_score[tidx] - max_score[tidx];
-                    
-                    const int smem_index =  tidx*64 + tidy*8;
-                    const float diff_exp = exp(diff);
-                    if(diff != 0)
+                    for(int i=0;i<4;i++)
                     {
-                        #pragma unroll
-                        for(int i=0;i<8;i++){
-                            out_temp[smem_index+i] *= diff_exp;
-                        }
+                        float temp =  exp(temp_score[(i+tidy*4)][tidx] - max_score[tidx]);
+                        temp_score[(i+tidy*4)][tidx] = temp;
                     }
 
+                    #pragma unroll
+                    for(int i=0;i<4;i++){
+                        float diff = (pre_max_score[tidy*4+i] - max_score[tidy*4+i]);
+                        if(diff != 0){
+                            diff = exp(diff);
+                            out_temp[tidy*4+i][tidx] *= diff;
+                            out_temp[tidy*4+i][tidx+32] *= diff;
+                        }
+                    }
                     __syncthreads();
                     if(tidy == 0){
-                        float before = global_sum_scores[tidx];
-                        global_sum_scores[tidx] *= diff_exp;
-                        float then = global_sum_scores[tidx];
-                        for(int i=0;i<8;i++)
-                            global_sum_scores[tidx] += sum_scores[i][tidx];
-
-                        // if(tidx == 0 && tidy == 0 && bidx == 0 && bidy == 0  && a_bm == 0)
-                        //     printf("%.f %.f %.f %.f %.f %.f %.f\n",pre_max_score[tidx],max_score[tidx],before,diff,exp(diff),then,global_sum_scores[tidx]);
+                        float diff = exp(pre_max_score[tidx] - max_score[tidx]);
+                        global_sum_scores[tidx] *= diff;
                     }
+                    
+
+                }
+                {
+                    int num = 16;
+                    while(num >= 1)
+                    {
+                        if(num == 16)
+                        {
+                            int value1 = temp_score[tidy][tidx];
+                            int value2 = temp_score[tidy+16][tidx];
+                            int value3 = temp_score[tidy+8][tidx];
+                            int value4 = temp_score[tidy+24][tidx];
+                            temp_smem[tidy][tidx] = value1 + value2;
+                            temp_smem[tidy+8][tidx] = value3 + value4;
+                        }
+                        else if(tidy < num){
+                            int value1 = temp_smem[tidy][tidx];
+                            int value2 = temp_smem[tidy+num][tidx];
+                            temp_smem[tidy][tidx] = value1 + value2;
+                        }
+                        num = num >> 1;
+                        __syncthreads();
+                    }
+                    if(tidy == 0)
+                        global_sum_scores[tidx] += temp_smem[0][tidx];
                 }
 
-                // 计算S*V
+                //计算S*V
+                cooperative_groups::wait(block_v);
+
                 #pragma unroll
-                for(int c_bk=0;c_bk<head_size/C_BK;c_bk++){
-
-                    const int smem_index = tidx*4; // warp_size * 8
-                    const int global_c_index_i = (smem_index / 32 + tidy*4 + b_bn*32);
-                    const int global_c_index_j = (smem_index % 32 + c_bk*C_BK);
-                    // 加载V
-                    #pragma unroll
-                    for(int i=0;i<C_BN;i+=4){
-                        FLOAT4(smem_c[tidy][smem_index+i]) = FLOAT4(c[data_offset_b+global_c_index_i*head_size+global_c_index_j+i]);
+                for(int i = 0;i<4; i++){
+                    for(int j=0;j<32;j++){
+                        out_temp[tidy*4+i][tidx] += temp_score[j][tidy*4+i]*smem_v[j][tidx];
+                        out_temp[tidy*4+i][tidx+32] += temp_score[j][tidy*4+i]*smem_v[j][tidx+32];
                     }
+                }
+                __syncthreads();
 
-                    __syncthreads();
-                    // 计算S*V
-                    #pragma unroll
-                    for(int i = 0;i<32;i += b_dimx){
-                        for(int j=0;j<32;j++){
-                            const int out_global_index_i = tidy + i;
-                            const int out_global_index_j = tidx + c_bk*C_BK;
-                            const int index = out_global_index_i*64+out_global_index_j;
-                            const float score = temp_score[j/4][(j%4)*32+out_global_index_i];
-                            out_temp[index]  += score*smem_c[j/4][(j%4)*32+tidx];
-                        }
-                    }
-                    __syncthreads();
+                //加载下一次使用的数据
+                if(block_id != select_block_num - 1 || b_bn != 1)
+                {
+                    cooperative_groups::memcpy_async(block_v, smem_v[0], c+data_b_start+next_bn*32*head_size, sizeof(float)*32*64);
                 }
             }
         }
@@ -211,7 +229,7 @@ __global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, DataTy
         // 结果写入global mem
         #pragma unroll
         for(int i=0;i<8;i+=1){
-            out[data_offset_a+(a_bm*A_BM+index_x+i)*head_size+index_y] = out_temp[(index_x+i)*64+index_y] / global_sum_scores[index_x+i];
+            out[data_offset_a+(a_bm*A_BM+index_x+i)*head_size+index_y] = out_temp[(index_x+i)][index_y] / global_sum_scores[index_x+i];
         }
 
         __syncthreads();

@@ -7,7 +7,7 @@ find_package(Torch REQUIRED
             PATHS /home/wong/TurboTransformers/libtorch
             NO_DEFAULT_PATH)
 add_library(test_lib OBJECT
-    attention_2.cu
+    attention.cu
     )
 add_executable(test test.cpp)
 target_link_libraries(test "${TORCH_LIBRARIES}")
