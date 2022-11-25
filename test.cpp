@@ -38,79 +38,6 @@ void print_tensor(float* data,int len1, int len2){
     }
 }
 
-// int main()
-// {
-//     int m = 64, k = 64, n = 11*64;
-//     torch::Tensor query = torch::zeros({m,k},torch::kFloat);
-//     torch::Tensor key =torch::zeros({n,k},torch::kFloat);
-//     torch::Tensor value =torch::zeros({n,k},torch::kFloat);
-//     torch::Tensor out = torch::zeros({m,k},torch::kFloat).to(at::kCUDA);
-
-//     generate_array(reinterpret_cast<float*>(query.data_ptr()),m*k);
-//     generate_array(reinterpret_cast<float*>(key.data_ptr()),n*k);
-//     generate_array(reinterpret_cast<float*>(value.data_ptr()),n*k);
-
-
-//     query = query.transpose(0,1).contiguous().to(at::kCUDA);
-//     key = key.to(at::kCUDA);
-//     value = value.to(at::kCUDA);
-
-//     auto select_index = torch::tensor({{{0,1,2,3,4,5,6,7,8,9,10}}}).to(at::kCUDA);
-
-//     std::cout<<select_index<<std::endl;
-
-
-//     test_gemm_(reinterpret_cast<float*>(query.data_ptr()),reinterpret_cast<float*>(key.data_ptr()),reinterpret_cast<float*>(value.data_ptr()),reinterpret_cast<float*>(out.data_ptr()),reinterpret_cast<int*>(select_index.data_ptr()),1,1,64,64);
-    
-
-//     // auto q = ;
-//     query = query.transpose(0,1).contiguous().to(at::kCUDA);
-
-//     torch::Tensor out1 = torch::mm(query,key.transpose(0,1));
-//     auto max_value = std::get<0>(torch::max(out1,-1)).unsqueeze(1);
-//     // std::cout<<out1.sizes()<<std::endl;
-//     // std::cout<<max_value<<std::endl;
-
-//     // auto attn_weights = torch::exp(out1 - max_value);
-//     auto attn_weights = torch::exp(out1 - max_value);
-
-//     auto sum_weight = attn_weights.sum(-1);
-//     // std::cout<<sum_weight.unsqueeze(1).sizes()<<std::endl;
-//     torch::Tensor out2 = torch::mm(attn_weights,value);
-//     std::cout<<out2[0][8]<<std::endl;
-//     std::cout<<sum_weight[0]<<std::endl;
-//     out2 = out2/sum_weight.unsqueeze(1);
-//     // std::cout<<out1.index({torch::indexing::Slice(0, 1),"..."})<<std::endl;
-//     // std::cout<<key.index({"...",torch::indexing::Slice(128,129)})<<std::endl;
-//     // std::cout<<out2.index({torch::indexing::Slice(0, 64),torch::indexing::Slice(0, 64)})<<std::endl;
-//     // print_tensor(reinterpret_cast<float*>(out2.to(at::kCPU).data_ptr()),64,64);
-//     // std::cout<<out1.index({torch::indexing::Slice(0, 1),torch::indexing::Slice(0, 1)})<<std::endl;
-
-//     // std::cout<<out[0][0]<<" "<<out<<std::endl;
-
-    
-//     std::cout<<"The result is "<<check_value<float>(reinterpret_cast<float*>(out.to(at::kCPU).data_ptr()),reinterpret_cast<float*>(out2.to(at::kCPU).data_ptr()),out.numel(),out2.numel())<<std::endl;
-
-//     // std::cout<<out[0][0]<<std::endl;
-
-//     // torch::DeviceType device_type;
-//     // if (torch::cuda::is_available()) {
-//     //     std::cout << "CUDA available! Predicting on GPU." << std::endl;
-//     //     device_type = torch::kCUDA;
-//     // }
-//     // else {
-//     //     std::cout << "Predicting on CPU." << std::endl;
-//     //     device_type = torch::kCPU;
-//     // }
-//     // torch::Device device(device_type);
-//     // torch::Tensor tensor = torch::eye(3);
-//     // tensor = tensor.to(at::kCUDA);
-//     // std:cout<<tensor<<std::endl;
-//     std::cout<<"hello torch"<<std::endl;
-//     // std::cout<<tensor<<std::endl;
-//     return 0;
-// }
-
 
 void generate_select_index_v1(int block_num,int head_num,int select_len, std::vector<int> &select_array, std::vector<int> array){
     for(int i=0;i<block_num*head_num;i++){
@@ -143,10 +70,7 @@ void select_K_and_V(int block_num,int head_size,std::vector<std::vector<int>> se
     return ;
 }
 
-
-
-int main()
-{
+void test_gemm(){
     int seq_len = 4096, d_num = 768;
     torch::Tensor query = torch::zeros({seq_len,d_num},torch::kFloat);
     torch::Tensor key =torch::zeros({seq_len,d_num},torch::kFloat);
@@ -256,5 +180,43 @@ int main()
     
     // std::cout<<"The result is "<<check_value<float>(reinterpret_cast<float*>(out.to(at::kCPU).data_ptr()),reinterpret_cast<float*>(out2.to(at::kCPU).data_ptr()),out.numel(),out2.numel())<<std::endl;
 
+}
+
+
+void test_add_bias_and_transpose(){
+    int seq_len = 4096, d_num = 768;
+    torch::Tensor input_data = torch::zeros({seq_len,d_num*3},torch::kFloat);
+    torch::Tensor key =torch::zeros({seq_len,d_num},torch::kFloat).to(at::kCUDA);
+    torch::Tensor value =torch::zeros({seq_len,d_num},torch::kFloat).to(at::kCUDA);
+    torch::Tensor query =torch::zeros({seq_len,d_num},torch::kFloat).to(at::kCUDA);
+    torch::Tensor bias = torch::zeros({d_num*3},torch::kFloat);
+
+    generate_array(reinterpret_cast<float*>(input_data.data_ptr()),seq_len*d_num*3);
+    generate_array(reinterpret_cast<float*>(bias.data_ptr()),3*d_num);
+
+    int block_size = 64,head_num =12;
+    int block_num = seq_len/block_size;
+    int head_size = d_num / head_num;
+
+    test_add_bias_and_transpose(reinterpret_cast<float*>(bias.to(at::kCUDA).data_ptr()),reinterpret_cast<float*>(input_data.to(at::kCUDA).data_ptr()),reinterpret_cast<float*>(query.data_ptr()),reinterpret_cast<float*>(key.data_ptr()),reinterpret_cast<float*>(value.data_ptr()),0,d_num,d_num*2,1,4096,12,64,64,64);
+
+    input_data = input_data + bias;
+
+
+    query = query.reshape({head_num,block_num,block_size,d_num/head_num});
+    key = key.reshape({head_num,block_num,block_size,d_num/head_num});
+    value = value.reshape({head_num,block_num,block_size,d_num/head_num});
+
+    auto query_1 = input_data.index({"...",torch::indexing::Slice(0, d_num)}).reshape({block_num,block_size,head_num,head_size}).permute({2,0,1,3}).transpose(-2,-1).contiguous();
+    auto key_1 = input_data.index({"...",torch::indexing::Slice(d_num, d_num*2)}).reshape({block_num,block_size,head_num,head_size}).permute({2,0,1,3}).contiguous();
+    auto value_1 = input_data.index({"...",torch::indexing::Slice(d_num*2, d_num*3)}).reshape({block_num,block_size,head_num,head_size}).permute({2,0,1,3}).contiguous();
+
+    std::cout<<"The result is "<<check_value<float>(reinterpret_cast<float*>(query_1.to(at::kCPU).data_ptr()),reinterpret_cast<float*>(query.to(at::kCPU).data_ptr()),key_1.numel(),key.numel())<<std::endl;
+
+}
+
+int main()
+{
+    test_add_bias_and_transpose();
     return 0;
 }
