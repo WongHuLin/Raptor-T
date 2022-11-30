@@ -20,7 +20,7 @@ bool check_value(type* A,type *B, int len_a, int len_b){
     }
     std::cout<<setiosflags(std::ios::fixed);
     for(int i=0;i<len_a;i++){
-        if(abs(A[i]-B[i])>1e-6){
+        if(abs(A[i]-B[i])>1e-4){
             std::cout<<std::setprecision(2)<<i<<" "<<A[i]<<" "<<B[i]<<" "<<abs(A[i]-B[i])<<std::endl;
             return false;
         }
@@ -215,8 +215,43 @@ void test_add_bias_and_transpose(){
 
 }
 
+void test_add_bias_and_layernorm_(){
+    int seq_len = 4096, d_num = 768;
+    torch::Tensor input_data =torch::zeros({seq_len,d_num},torch::kFloat);
+    torch::Tensor out_data =torch::zeros({seq_len,d_num},torch::kFloat).to(torch::kCUDA);
+    torch::Tensor bias = torch::zeros({d_num},torch::kFloat);
+    torch::Tensor layernorm_weight = torch::ones({d_num},torch::kFloat).to(torch::kCUDA);
+    torch::Tensor layernorm_bias = torch::zeros({d_num},torch::kFloat).to(torch::kCUDA);
+
+    generate_array(reinterpret_cast<float*>(input_data.data_ptr()),seq_len*d_num);
+    generate_array(reinterpret_cast<float*>(bias.data_ptr()),d_num);
+    
+
+    input_data = input_data.to(torch::kCUDA);
+    bias = bias.to(torch::kCUDA);
+
+    test_add_bias_and_layernorm(reinterpret_cast<float*>(out_data.data_ptr()),reinterpret_cast<float*>(input_data.data_ptr()),reinterpret_cast<float*>(bias.data_ptr()),4096,2,768,float(1e-5),reinterpret_cast<float*>(layernorm_weight.data_ptr()),reinterpret_cast<float*>(layernorm_bias.data_ptr()));
+
+    input_data += bias;
+    torch::nn::LayerNorm model(torch::nn::LayerNormOptions({768}).elementwise_affine(false).eps(1e-5));
+    input_data = model(input_data);
+
+    
+    std::cout.flags(std::ios::fixed);
+    std::cout.precision(6);
+    float a = 1.1f;
+    // std::cout<<a<<std::endl;
+    
+    std::cout<<reinterpret_cast<float*>(torch::mean(input_data.to(at::kCPU),1).data_ptr())[0]<<" "<<reinterpret_cast<float*>(torch::mean(input_data.to(at::kCPU),1).data_ptr())[1]<<" "<<reinterpret_cast<float*>(torch::var(input_data.to(at::kCPU)[0],false).data_ptr())[0]<<" "<<reinterpret_cast<float*>(torch::var(input_data.to(at::kCPU)[1], false).data_ptr())[0]<<" "<<std::endl;
+
+    // std::cout<<out_data<<std::endl;
+    
+    std::cout<<"The result is "<<check_value<float>(reinterpret_cast<float*>(input_data.to(at::kCPU).data_ptr()),reinterpret_cast<float*>(out_data.to(at::kCPU).data_ptr()),input_data.numel(),out_data.numel())<<std::endl;
+
+}
+
 int main()
 {
-    test_add_bias_and_transpose();
+    test_add_bias_and_layernorm_();
     return 0;
 }
