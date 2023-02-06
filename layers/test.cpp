@@ -2,6 +2,8 @@
 #include <torch/torch.h>
 #include "./kernels/mat_mul.h"
 #include "./kernels/kernel.h"
+#include "./bert_output.h"
+#include "./bert_intermediate.h"
 void test_GenerateSparseBlockIndex(){
     sparse_transformers::layers::MultiHeadedAttention multi_headed_attention = sparse_transformers::layers::MultiHeadedAttention();
     torch::Tensor select_index_tensor,select_index_position_tensor;
@@ -25,7 +27,7 @@ bool check_value(type* A,type *B, int len_a, int len_b){
     }
     std::cout<<setiosflags(std::ios::fixed);
     for(int i=0;i<len_a;i++){
-        if(abs(A[i]-B[i])>1){
+        if(abs(A[i]-B[i])>1e-2){
             std::cout<<std::setprecision(2)<<i<<" "<<A[i]<<" "<<B[i]<<" "<<abs(A[i]-B[i])<<std::endl;
             return false;
         }
@@ -79,7 +81,7 @@ void test_sparse_attention(){
     auto first_and_last_score = torch::bmm(first_and_last,key.reshape({head_num,key.numel()/head_num/block_size,block_size}).transpose(-2,-1));
     first_and_last_score = first_and_last_score.softmax(-1);
     auto first_and_last_out = torch::bmm(first_and_last_score,value.reshape({head_num,key.numel()/head_num/block_size,block_size}));
-    std::cout<<first_and_last_out.sizes()<<std::endl;
+    // std::cout<<first_and_last_out.sizes()<<std::endl;
 
     std::cout<<"The first result is "<<check_value<float>(reinterpret_cast<float*>(first_and_last_out.index({"...",torch::indexing::Slice(0, 64),torch::indexing::Slice(0, 64)}).to(at::kCPU).contiguous().data_ptr()),reinterpret_cast<float*>(out.index({"...",torch::indexing::Slice(0, 1),torch::indexing::Slice(0, 64),torch::indexing::Slice(0, 64)}).to(at::kCPU).contiguous().data_ptr()),first_and_last_out.numel()/2,first_and_last_out.numel()/2)<<std::endl;
     std::cout<<"The last result is "<<check_value<float>(reinterpret_cast<float*>(first_and_last_out.index({"...",torch::indexing::Slice(64, 128),torch::indexing::Slice(0, 64)}).to(at::kCPU).contiguous().data_ptr()),reinterpret_cast<float*>(out.index({"...",torch::indexing::Slice(63, 64),torch::indexing::Slice(0, 64),torch::indexing::Slice(0, 64)}).to(at::kCPU).contiguous().data_ptr()),first_and_last_out.numel()/2,first_and_last_out.numel()/2)<<std::endl;
@@ -223,24 +225,34 @@ void test_MultiHeadedAttention_operator(){
     torch::Tensor k_out = torch::zeros({seq_len,d_num},torch::kFloat).to(torch::kCUDA);
     torch::Tensor v_out = torch::zeros({seq_len,d_num},torch::kFloat).to(torch::kCUDA);
 
+    torch::Tensor dense_weight = torch::zeros({d_num,d_num},torch::kFloat);
+    torch::Tensor dense_bias = torch::zeros({d_num},torch::kFloat);
+    torch::Tensor layernorm_weight = torch::ones({d_num},torch::kFloat).to(torch::kCUDA);
+    torch::Tensor layernorm_bias = torch::zeros({d_num},torch::kFloat).to(torch::kCUDA);
+
+
     torch::Tensor qkv_weight = torch::zeros({d_num,d_num*3},torch::kFloat);
     torch::Tensor qkv_bias = torch::zeros({d_num*3},torch::kFloat);
 
     generate_array(reinterpret_cast<float*>(qkv_weight.data_ptr()),d_num*d_num*3);
     generate_array(reinterpret_cast<float*>(qkv_bias.data_ptr()),3*d_num);
+    generate_array(reinterpret_cast<float*>(dense_weight.data_ptr()),d_num*d_num);
+    generate_array(reinterpret_cast<float*>(dense_bias.data_ptr()),d_num);
     qkv_weight = qkv_weight.to(torch::kCUDA);
     qkv_bias = qkv_bias.to(torch::kCUDA);
+    dense_weight = dense_weight.to(torch::kCUDA);
+    dense_bias = dense_bias.to(torch::kCUDA);
 
 
     torch::Tensor input_data = torch::zeros({seq_len,d_num},torch::kFloat);
     generate_array(reinterpret_cast<float*>(input_data.data_ptr()),seq_len*d_num);
     input_data = input_data.to(torch::kCUDA);
 
-    sparse_transformers::layers::MultiHeadedAttention multi_headed_attention = sparse_transformers::layers::MultiHeadedAttention(torch::Tensor(),torch::Tensor(),torch::Tensor(),torch::Tensor(),torch::Tensor(),torch::Tensor(),torch::Tensor(),torch::Tensor(),qkv_weight,qkv_bias,3);
+    sparse_transformers::layers::MultiHeadedAttention multi_headed_attention = sparse_transformers::layers::MultiHeadedAttention(torch::Tensor(),torch::Tensor(),torch::Tensor(),torch::Tensor(),torch::Tensor(),torch::Tensor(),dense_weight,dense_bias,qkv_weight,qkv_bias,layernorm_weight,layernorm_bias,3);
 
     torch::Tensor out = torch::zeros({seq_len,d_num},torch::kFloat).to(torch::kCUDA);
 
-    multi_headed_attention(input_data,torch::zeros(0),"self",out,torch::zeros(0),torch::zeros(0),4096,false,12,64,64,64,768);
+    multi_headed_attention(input_data,torch::zeros(0),"self",out,torch::zeros(0),torch::zeros(0),4096,12,64,64,64,768);
 
     // auto qkv_temp = torch::matmul(input_data,qkv_weight);
     // qkv_temp = qkv_temp + qkv_bias;
@@ -254,6 +266,71 @@ void test_MultiHeadedAttention_operator(){
     // std::cout<<"The result is "<<check_value<float>(reinterpret_cast<float*>(value.to(at::kCPU).data_ptr()),reinterpret_cast<float*>(v_out.to(at::kCPU).data_ptr()),q_out.numel(),q_out.numel())<<std::endl;
 }
 
+void test_bert_intermediate(){
+    torch::Tensor weight = torch::rand({768,3072});
+    torch::Tensor bias = torch::rand({768});
+    sparse_transformers::layers::BertIntermediate(weight,bias);
+}
+
+void test_bert_output(){
+    int seq_len = 4096, d_num = 768;
+    torch::Tensor hidden_states =torch::zeros({seq_len,d_num},torch::kFloat);
+    torch::Tensor input_data =torch::zeros({seq_len,d_num},torch::kFloat);
+    torch::Tensor out_data =torch::zeros({seq_len,d_num},torch::kFloat);
+    torch::Tensor bias = torch::zeros({d_num},torch::kFloat);
+    torch::Tensor dense_weight = torch::zeros({d_num,d_num},torch::kFloat);
+    torch::Tensor dense_bias = torch::zeros({d_num},torch::kFloat);
+    torch::Tensor layernorm_weight = torch::ones({d_num},torch::kFloat).to(torch::kCUDA);
+    torch::Tensor layernorm_bias = torch::zeros({d_num},torch::kFloat).to(torch::kCUDA);
+
+    generate_array(reinterpret_cast<float*>(out_data.data_ptr()),seq_len*d_num);
+    generate_array(reinterpret_cast<float*>(input_data.data_ptr()),seq_len*d_num);
+    generate_array(reinterpret_cast<float*>(bias.data_ptr()),d_num);
+    generate_array(reinterpret_cast<float*>(dense_weight.data_ptr()),d_num*d_num);
+    generate_array(reinterpret_cast<float*>(dense_bias.data_ptr()),d_num);
+    generate_array(reinterpret_cast<float*>(hidden_states.data_ptr()),seq_len*d_num);
+
+    out_data = out_data.to(torch::kCUDA);
+    input_data = input_data.to(torch::kCUDA);
+    bias = bias.to(torch::kCUDA);
+    dense_weight = dense_weight.to(torch::kCUDA);
+    dense_bias = dense_bias.to(torch::kCUDA);
+    hidden_states = hidden_states.to(torch::kCUDA);
+
+    sparse_transformers::layers::kernels::MatMul(hidden_states, false, dense_weight, false, 1.0,
+                  out_data, 0.0);
+    // std::cout<<hidden_states.to(torch::kCPU).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,10)})<<std::endl;
+    // std::cout<<dense_weight.to(torch::kCPU).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,10)})<<std::endl;
+    // std::cout<<out_data.to(torch::kCPU).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,10)})<<std::endl;
+
+    sparse_transformers::layers::kernels::test_add_bias_and_layernorm(reinterpret_cast<float*>(out_data.data_ptr()),
+    reinterpret_cast<float*>(input_data.data_ptr()),reinterpret_cast<float*>(dense_bias.data_ptr()),
+    seq_len,2,768,float(1e-5),reinterpret_cast<float*>(layernorm_weight.data_ptr()),
+    reinterpret_cast<float*>(layernorm_bias.data_ptr()));
+
+    torch::Tensor out = torch::mm(hidden_states,dense_weight);
+    // std::cout<<hidden_states.to(torch::kCPU).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,10)})<<std::endl;
+    // std::cout<<dense_weight.to(torch::kCPU).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,10)})<<std::endl;
+    // std::cout<<out.to(torch::kCPU).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,10)})<<std::endl;
+    out = out + dense_bias;
+    out = out + input_data;
+
+    torch::nn::LayerNorm layernorm(torch::nn::LayerNormOptions({768}).elementwise_affine(false).eps(1e-5));
+
+    out = layernorm(out);
+    out = out * layernorm_weight + layernorm_bias;
+
+    // std::cout<<out<<std::endl;
+
+    std::cout<<out.to(torch::kCPU).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,10)})<<std::endl;
+    std::cout<<out_data.to(torch::kCPU).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,10)})<<std::endl;
+
+    
+
+    std::cout<<"The result is "<<check_value<float>(reinterpret_cast<float*>(out.to(at::kCPU).data_ptr()),reinterpret_cast<float*>(out_data.to(at::kCPU).data_ptr()),out_data.numel(),out_data.numel())<<std::endl;
+
+}
+
 int main(){
-    test_MultiHeadedAttention_operator();
+    test_sparse_attention();
 }

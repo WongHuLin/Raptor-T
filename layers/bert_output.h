@@ -13,9 +13,7 @@ class BertOutput {
         dense_bias_(std::move(dense_bias)),
         layer_norm_weight_(std::move(layer_norm_weight)),
         layer_norm_bias_(std::move(layer_norm_bias)) {
-    EnforceShapeAndType();
   }
-  void EnforceShapeAndType() const;
 
   void operator()(const torch::Tensor &hidden_states,
                   const torch::Tensor &input_tensor, torch::Tensor &output) const;

@@ -3,40 +3,71 @@
 #include "device_launch_parameters.h"
 #include <stdio.h>
 #include <iostream>
+#include <numeric>
 #include <cooperative_groups/memcpy_async.h>
 #include <thrust/extrema.h>
 // #include <cub/cub.cuh>
 #define FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
+#define FLOAT(pointer) (reinterpret_cast<float*>(&(pointer)))
 
 namespace sparse_transformers {
 namespace layers {
 namespace kernels {
 
-// lock-based
-__device__ volatile int g_mutex;
-// GPU lock-based synchronization function
-__device__ void __gpu_sync(int goalVal )
-{
-    // thread ID in a block
-    int tid_in_block = threadIdx.x * blockDim.y + threadIdx.y;
-    // only thread 0 is used for synchronization
-    if (tid_in_block == 0)
-    {
-    	atomicAdd((int*) &g_mutex, 1);
-    	// only when all blocks add 1 go g_mutex
-    	// will g_mutex equal to goalVal
-    	while (g_mutex != goalVal)
-    	{
-    		// Do nothing here
-    	}
-    }
-    __syncthreads();
+template <typename T, ActivationType ActType>
+__inline__ __device__ T ActivationOp(const T& x);
+
+
+template <>
+__inline__ __device__ float ActivationOp<float,ActivationType::Gelu>(const float& x){
+    float cdf =
+    0.5f *
+    (1.0f + tanhf((0.7978845608028654f * (x + 0.044715f * x * x * x))));
+    return x * cdf;
 }
 
+template <>
+__inline__ __device__ float ActivationOp<float,ActivationType::Tanh>(const float& x){
+    return tanhf(x);
+}
+
+template <>
+__inline__ __device__ float ActivationOp<float,ActivationType::Relu>(const float& x){
+    return (x > 0) ? x : 0;
+}
+
+template <typename T, ActivationType ActType>
+__global__ void add_bias_act(T* bias, T* out, int dim_size){
+    const int tidx = threadIdx.x;
+    const int bidx = blockIdx.x;
+    
+    const int start_index = tidx*4;
+
+    float4 reg_a = FLOAT4(bias[start_index]);
+    float4 reg_b = FLOAT4(out[start_index + bidx * dim_size]);
+    float4 reg_c;
+
+    reg_c.x = reg_a.x + reg_b.x;
+    reg_c.y = reg_a.y + reg_b.y;
+    reg_c.z = reg_a.z + reg_b.z;
+    reg_c.w = reg_a.w + reg_b.w;
+
+    reg_c.x = ActivationOp<T,ActType>(reg_c.x);
+    reg_c.y = ActivationOp<T,ActType>(reg_c.y);
+    reg_c.z = ActivationOp<T,ActType>(reg_c.z);
+    reg_c.w = ActivationOp<T,ActType>(reg_c.w);
+
+    FLOAT4(out[start_index + bidx * dim_size]) = reg_c;
+
+}
+    
 //(12,64)(32*8)
 //input_data: seq_len * all_head_size * 3   bias: all_head_size  q,k,v: seq * all_head_size
 template <class DataType>
-__global__ void add_bias_and_transpose(DataType *input_data, DataType *bias, DataType *q, DataType *k, DataType *v, int q_offset, int k_offset, int v_offset,int batch_size, int seq_len, int head_num, int block_size, int head_size, int block_num){
+__global__ void add_bias_and_transpose(DataType *input_data, DataType *bias, 
+    DataType *q, DataType *k, DataType *v, int q_offset, int k_offset, 
+    int v_offset,int batch_size, int seq_len, int head_num, int block_size, 
+    int head_size, int block_num){
     // For K and V: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * blcok_size * head_size
     // For Q: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * head_size* blcok_size
     const int tidy = threadIdx.y;
@@ -94,7 +125,9 @@ __global__ void add_bias_and_transpose(DataType *input_data, DataType *bias, Dat
   
 //(12,64)(32*8)
 template <class DataType>
-__global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, DataType *out,const int *select_index,int *select_index_position, const int block_size,const int head_size,const int select_block_num){
+__global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, 
+    DataType *out,const int *select_index,int *select_index_position, 
+    const int block_size,const int head_size,const int select_block_num){
 
 
     const int tidy = threadIdx.y;
@@ -308,7 +341,9 @@ __global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c, DataTy
 
 // (seq_len)(32*8)
 template <class DataType>
-__global__ void add_bias_and_layernorm(DataType *out_data, DataType *input_data, DataType *bias, int seq_len, int handle_row, int normalized_len, float eps, DataType *layernorm_weight, DataType *layernorm_bias){
+__global__ void add_bias_and_layernorm(DataType *out_data, DataType *input_data, 
+    DataType *bias, int seq_len, int handle_row, int normalized_len, float eps, 
+    DataType *layernorm_weight, DataType *layernorm_bias){
     const int tidy = threadIdx.y;
     const int tidx = threadIdx.x;
     const int bidx = blockIdx.x;
@@ -383,12 +418,106 @@ __global__ void add_bias_and_layernorm(DataType *out_data, DataType *input_data,
 
 }
 
+// 残差 相加
+template <class DataType>
+__global__ void add_bias_and_layernorm_1(DataType *out_data, DataType *input_data, 
+    DataType *bias, int seq_len, int handle_row, int normalized_len, float eps, 
+    DataType *layernorm_weight, DataType *layernorm_bias){
+    const int tidx = threadIdx.x;
+    const int tidy = threadIdx.y;
+    const int tidx_dim = blockDim.x;
+    const int tid = tidy*tidx_dim + tidx;
+
+    const int tidy_dim = blockDim.y;
+    const int bidx = blockIdx.x;
+    const int bidy = blockIdx.y;
+
+    typedef cub::WarpReduce<float> WarpReduce;
+    __shared__ typename WarpReduce::TempStorage temp_storage[6];
+
+    // 加载数据
+    // 原始数据
+    float4 data_1 = FLOAT4(out_data[bidx*handle_row*normalized_len + tid*4]);
+    // 加载残差数据
+    float4 input_data_1 = FLOAT4(input_data[bidx*handle_row*normalized_len + tid*4]);
+    float4 data_2 = FLOAT4(out_data[(bidx*handle_row+1)*normalized_len + tid*4]);
+    float4 input_data_2 = FLOAT4(input_data[(bidx*handle_row+1)*normalized_len + tid*4]);
+    float4 bias_ = FLOAT4(bias[tid*4]);
+    float4 layer_norm_weight_ = FLOAT4(layernorm_weight[tid*4]);
+    float4 layer_norm_bias_ = FLOAT4(layernorm_bias[tid*4]);
+
+    // if(bidx == 0 && bidy == 0 && tidx == 0 && tidy ==0 )
+    //     printf("%f %f %f \n",FLOAT(data_1)[1],FLOAT(input_data_1)[1],FLOAT(bias_)[1]);
+
+    float mean[2],var[2];
+
+    {
+        float sum[2] = {0.0f, 0.0f};
+        float sum_[2] = {0.0f, 0.0f};
+
+        for(int i=0;i<4;i++){
+            FLOAT(data_1)[i] = FLOAT(data_1)[i] + FLOAT(bias_)[i] + FLOAT(input_data_1)[i];
+            FLOAT(data_2)[i] = FLOAT(data_2)[i] + FLOAT(bias_)[i] + FLOAT(input_data_2)[i];
+            sum[0] += FLOAT(data_1)[i];
+            sum[1] += FLOAT(data_2)[i];
+            sum_[0] += FLOAT(data_1)[i]*FLOAT(data_1)[i];
+            sum_[1] += FLOAT(data_2)[i]*FLOAT(data_2)[i];
+        }
+        // if(bidx == 0 && bidy == 0)
+        //     printf("%f %f \n",sum[0],sum[1]);
+
+        __shared__ float sum_temp_smem[4][6];
+
+        sum_temp_smem[0][tidy] = WarpReduce(temp_storage[tidy]).Sum(sum[0]);
+        sum_temp_smem[1][tidy] = WarpReduce(temp_storage[tidy]).Sum(sum[1]);
+        sum_temp_smem[2][tidy] = WarpReduce(temp_storage[tidy]).Sum(sum_[0]);
+        sum_temp_smem[3][tidy] = WarpReduce(temp_storage[tidy]).Sum(sum_[1]);
+
+        __syncthreads();
+        if(tidy < 4){
+            float temp = 0.0f;
+            if(tidx < 6)
+                temp = sum_temp_smem[tidy][tidx];
+            
+            sum_temp_smem[0][tidy] = WarpReduce(temp_storage[tidy]).Sum(temp);
+        }
+
+        // if(tidy < 4){
+        //     float temp = 0.0f;
+        //     if(tidx < 6)
+        //         temp = sum_temp_smem[tidy][tidx];
+            
+        //         sum_temp_smem[0][tidy] = WarpReduce(temp_storage[tidy]).Sum(temp);
+        // }
+        __syncthreads();
+        mean[0] = sum_temp_smem[0][0]/normalized_len;
+        mean[1] = sum_temp_smem[0][1]/normalized_len;
+        var[0] = sqrt(sum_temp_smem[0][2]/normalized_len-mean[0]*mean[0]+eps);
+        var[1] = sqrt(sum_temp_smem[0][3]/normalized_len-mean[1]*mean[1]+eps);
+
+        // if(bidx == 0 && bidy == 0 && tidx == 0 && tidy ==0 )
+        //     printf("%f %f %f %f\n",mean[0],mean[1],var[0],var[1]);
+        
+    }
+    for(int i=0;i<4;i++){
+        FLOAT(data_1)[i] = (FLOAT(data_1)[i] - mean[0])/var[0]*FLOAT(layer_norm_weight_)[i] + FLOAT(layer_norm_bias_)[i];
+
+        FLOAT(data_2)[i] = (FLOAT(data_2)[i] - mean[1])/var[1]*FLOAT(layer_norm_weight_)[i] + FLOAT(layer_norm_bias_)[i];
+    }
+
+    __syncthreads();
+
+    FLOAT4(out_data[bidx*handle_row*normalized_len + tid*4]) = data_1;
+    FLOAT4(out_data[(bidx*handle_row+1)*normalized_len + tid*4]) = data_2;
+
+}
+
 void test_add_bias_and_layernorm(float *out,float *input_data, float *bias,int seq_len, int handle_row, int normalized_len, float eps,float* layernorm_weight,float* layernorm_bias){
     cudaEvent_t start,stop;
     cudaEventCreate( &start );
     cudaEventCreate( &stop ) ;
     cudaEventRecord( start, 0 ) ;
-    add_bias_and_layernorm<float><<<dim3(seq_len/handle_row),dim3(32,8)>>>(out,input_data,bias,seq_len,handle_row,normalized_len,eps,layernorm_weight,layernorm_bias);
+    add_bias_and_layernorm_1<float><<<dim3(seq_len/handle_row),dim3(32,6)>>>(out,input_data,bias,seq_len,handle_row,normalized_len,eps,layernorm_weight,layernorm_bias);
     cudaEventRecord(stop,0);
     float elapsedTime;
     cudaEventSynchronize(stop);
@@ -437,7 +566,11 @@ void test_gemm_(float *a, float *b,float *c, float *out,int *select_index,int *s
     cudaEventElapsedTime(&elapsedTime, start, stop);
     printf( "Time to generate:  %f ms\n", elapsedTime );
     // printf("%f\n",*a);
+}
 
+void test_add_bias_act(float *bias, float* out, int total_seq_len, int dim_size){
+    const int block_num = dim_size / 4;
+    add_bias_act<float,ActivationType::Gelu><<<dim3(total_seq_len),dim3(block_num)>>>(bias,out,dim_size);
 }
 }
 }

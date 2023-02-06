@@ -18,7 +18,6 @@ int block_size, int num_rand_blocks,int last_idx) const{
     int last_block = block_num - 1;
     if(last_idx != -1)
         last_block = last_idx / block_size - 1;
-    std::cout<<last_block<<std::endl;
     std::vector<int> ivec(last_block);
     std::iota(ivec.begin(), ivec.end(), 1);
     std::vector<int> select_index;
@@ -150,7 +149,9 @@ void MultiHeadedAttention::operator()(
     torch::Tensor k_out =torch::zeros({total_seq_len,d_num},torch::kFloat).to(torch::kCUDA);
     torch::Tensor v_out =torch::zeros({total_seq_len,d_num},torch::kFloat).to(torch::kCUDA);
     FuseGemm012AddBIasTranspose(input_tensor,q_out,k_out,v_out,4096,768);
+    // std::cout<<1<<std::endl;
     while(!sparse_index){
+
     }
     
     sparse_index = false;
@@ -161,14 +162,24 @@ void MultiHeadedAttention::operator()(
     reinterpret_cast<float*>(v_out.data_ptr()),reinterpret_cast<float*>(attention_out.data_ptr()),
     reinterpret_cast<int*>(select_index_tensor.data_ptr()),reinterpret_cast<int*>(select_index_position_tensor.data_ptr()),
     block_num,head_num,block_size,head_size);
+    // std::cout<<2<<std::endl;
+
+    // std::cout<<attention_out.sizes()<<std::endl;
+    // std::cout<<dense_weight_.sizes()<<std::endl;
+    // std::cout<<output.sizes()<<std::endl;
+
 
     kernels::MatMul(attention_out,false,dense_weight_,false,1,output,0);
+    // std::cout<<3<<std::endl;
+
 
     //layernorm
     kernels::test_add_bias_and_layernorm(reinterpret_cast<float*>(output.data_ptr()),
     reinterpret_cast<float*>(output.data_ptr()),reinterpret_cast<float*>(dense_bias_.data_ptr()),
     total_seq_len_,2,d_num_,float(1e-5),reinterpret_cast<float*>(layernorm_gamma_.data_ptr()),
     reinterpret_cast<float*>(layernorm_beta_.data_ptr()));
+    // std::cout<<4<<std::endl;
+
 
     }       
 }

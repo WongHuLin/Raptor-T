@@ -37,15 +37,11 @@ class BertAttention : public MultiHeadedAttention {
     d_num_ = 768;
     block_size_ = 64;
     head_size_ = d_num_/head_num_;
-    EnforceShapeAndType();
   }
-    void EnforceShapeAndType() const;
 
     void operator()(const torch::Tensor &input_tensor,
                   const torch::Tensor &attention_mask, torch::Tensor &output,
-                  const int total_seq_len,
-                  torch::Tensor attn = torch::empty(0),
-                  bool is_trans_weight = false) const;
+                  const int total_seq_len) const;
 
     mutable int64_t head_num_;
     mutable int64_t d_num_;
