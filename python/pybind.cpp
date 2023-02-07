@@ -3,9 +3,7 @@
 #include "../layers/bert_intermediate.h"
 #include "../layers/bert_output.h"
 #include "../layers/bert_pooler.h"
-#include "../layers/multi_headed_attention.h"
-#include "../layers/kernels/kernel.h"
-#include "../layers/kernels/mat_mul.h"
+
 
 namespace sparse_transformers {
 namespace python {

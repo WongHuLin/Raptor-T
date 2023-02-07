@@ -1,5 +1,6 @@
 import torch
 import lltm_cpp as cxx
+import torch.cuda.nvtx as nvtx
 
 from typing import Union, Optional, Sequence
 from transformers.models.bert.modeling_bert import BertEmbeddings as TorchBertEmbeddings
@@ -24,8 +25,10 @@ class BertIntermediate(cxx.BertIntermediate):
                  input_tensor: torch.Tensor,
                  total_seq_len: int,
                  output: Optional[torch.Tensor] = None) -> torch.Tensor:
+        nvtx.range_push("intermediate")
         output = create_empty_if_none(output,(total_seq_len,3072),torch.device('cuda'))
         super(BertIntermediate,self).__call__(input_tensor, output)
+        nvtx.range_pop()
         return output
 
     @staticmethod
@@ -43,8 +46,10 @@ class BertOutput(cxx.BertOutput):
                  attention_output: torch.Tensor,
                  total_seq_len: int,
                  output: Optional[torch.Tensor] = None) -> torch.Tensor:
+        nvtx.range_push("output")
         output = create_empty_if_none(output,(total_seq_len,768),torch.device('cuda'))
         super(BertOutput, self).__call__(intermediate_output,attention_output,output)
+        nvtx.range_pop()
         return output
 
     @staticmethod
@@ -64,9 +69,10 @@ class BertAttention(cxx.BertAttention):
                  head_mask: Optional[torch.Tensor] = torch.empty(0),
                  output_attentions: Optional[bool] = False,
                  is_trans_weight: Optional[bool] = False) -> torch.Tensor:
+        nvtx.range_push("attention")
         context_layer = torch.zeros_like(input_tensor)
         super(BertAttention,self).__call__(input_tensor,attention_mask,context_layer,total_seq_len)
-        
+        nvtx.range_pop()
         return context_layer
 
     @staticmethod
@@ -109,6 +115,7 @@ class BertLayer:
                  attention_mask: Optional[torch.Tensor] = torch.empty(0),
                  head_mask: Optional[torch.Tensor] = torch.empty(0),
                  output_attentions=False):
+        nvtx.range_push("layer")
         attention_output = self.attention(
             hidden_states,
             total_seq_len,
@@ -120,7 +127,7 @@ class BertLayer:
         layer_out = self.output(intermediate_output,
                                 attention_output,
                                 total_seq_len)
-
+        nvtx.range_pop()
         return layer_out
 
     @staticmethod

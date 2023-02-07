@@ -45,10 +45,11 @@ def test_BertLayer():
     hidden_states = torch.rand(4096,768).to(device)
     output = bertLayer(hidden_states,768)
 
-def test_BertEncoder():
-    bertEncoder = BertEncoder.from_torch(model.encoder)
-    hidden_states = torch.rand(4096,768).to(device)
+# def test_BertEncoder():
+bertEncoder = BertEncoder.from_torch(model.encoder)
+hidden_states = torch.rand(4096,768).to(device)
+for i in range(0,10):
     output = bertEncoder(hidden_states,4096)
 
-output = model.encoder.layer[0].attention.output
-input_tensor = torch.rand(2,768).to(device)
+# output = model.encoder.layer[0].attention.output
+# input_tensor = torch.rand(2,768).to(device)

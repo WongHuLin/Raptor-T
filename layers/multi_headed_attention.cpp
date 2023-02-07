@@ -156,6 +156,9 @@ void MultiHeadedAttention::operator()(
     
     sparse_index = false;
 
+    std::cout<<select_index_tensor<<std::endl;
+    std::cout<<select_index_position_tensor<<std::endl;
+
     torch::Tensor attention_out = torch::zeros({total_seq_len,d_num},torch::kFloat).to(torch::kCUDA);
 
     kernels::test_gemm_(reinterpret_cast<float*>(q_out.data_ptr()),reinterpret_cast<float*>(k_out.data_ptr()),
