@@ -11,24 +11,26 @@ namespace sparse_transformers {
 namespace layers {
 
 void MultiHeadedAttention::GenerateSparseBlockIndex(torch::Tensor& select_index_tensor, 
-torch::Tensor& select_index_position_tensor, const torch::Tensor& seq_len_info,int total_seq_len, 
-int block_size, int num_rand_blocks,int last_idx) const{
+torch::Tensor& select_index_position_tensor, std::vector<int> seq_len_info,int total_seq_len, 
+int block_size, int num_rand_blocks) const{
 
-    int block_num = total_seq_len/block_size;
-    int last_block = block_num - 1;
-    if(last_idx != -1)
-        last_block = last_idx / block_size - 1;
-    std::vector<int> ivec(last_block);
-    std::iota(ivec.begin(), ivec.end(), 1);
+    
     std::vector<int> select_index;
     std::vector<int> select_block_position_index;
     select_block_position_index.push_back(0);
+    for(int seq_len_index = 0; seq_len_index < seq_len_info.size()-1; seq_len_index++){
+        int seq_start = seq_len_info[seq_len_index];
+        int seq_end = seq_len_info[seq_len_index+1];
+        int block_num = seq_end - seq_start;
+        int last_block = block_num - 1;
+        std::vector<int> ivec(block_num);
+        std::iota(ivec.begin(), ivec.end(), 0);
+
     for(int i=0;i<block_num;i++){
+
         std::vector<int> temp(ivec);
         if(i == 0 || i == block_num - 1){
-            std::vector<int> t(block_num);
-            std::iota(t.begin(), t.end(), 0);
-            select_index.insert(select_index.end(),t.begin(),t.end());
+            select_index.insert(select_index.end(),ivec.begin(),ivec.end());
         }
         else{
             //slide
@@ -42,8 +44,8 @@ int block_size, int num_rand_blocks,int last_idx) const{
             select_index.push_back(block_num-1);
 
             //ramdon
-            std::shuffle(temp.begin()+2,temp.end(),std::mt19937{ std::random_device{}()});
-            select_index.insert(select_index.end(),temp.begin()+2,temp.begin()+2+num_rand_blocks);
+            std::shuffle(temp.begin()+3,temp.end()-1,std::mt19937{ std::random_device{}()});
+            select_index.insert(select_index.end(),temp.begin()+3,temp.begin()+3+num_rand_blocks);
         }
         else if (i == 2)
         {
@@ -52,8 +54,8 @@ int block_size, int num_rand_blocks,int last_idx) const{
             select_index.push_back(0);
 
             //ramdon
-            std::shuffle(temp.begin()+3,temp.end(),std::mt19937{ std::random_device{}()});
-            select_index.insert(select_index.end(),temp.begin()+3,temp.begin()+3+num_rand_blocks);
+            std::shuffle(temp.begin()+4,temp.end()-1,std::mt19937{ std::random_device{}()});
+            select_index.insert(select_index.end(),temp.begin()+4,temp.begin()+4+num_rand_blocks);
         }
         else if (i == block_num - 3)
         {
@@ -62,8 +64,8 @@ int block_size, int num_rand_blocks,int last_idx) const{
             select_index.push_back(block_num-1);
 
             //ramdon
-            std::shuffle(temp.begin(),temp.end(),std::mt19937{ std::random_device{}()});
-            select_index.insert(select_index.end(),temp.begin(),temp.begin()+num_rand_blocks);
+            std::shuffle(temp.begin()+1,temp.end()-4,std::mt19937{ std::random_device{}()});
+            select_index.insert(select_index.end(),temp.begin()+1,temp.begin()+1+num_rand_blocks);
         }
         else if (i == block_num - 2)
         {
@@ -71,8 +73,8 @@ int block_size, int num_rand_blocks,int last_idx) const{
             select_index.push_back(0);
 
             //ramdon
-            std::shuffle(temp.begin(),temp.end(),std::mt19937{ std::random_device{}()});
-            select_index.insert(select_index.end(),temp.begin(),temp.begin()+num_rand_blocks);
+            std::shuffle(temp.begin()+1,temp.end()-3,std::mt19937{ std::random_device{}()});
+            select_index.insert(select_index.end(),temp.begin()+1,temp.begin()+1+num_rand_blocks);
         }
         else if (i != 0 && i != block_num - 1){
             //global
@@ -90,13 +92,22 @@ int block_size, int num_rand_blocks,int last_idx) const{
                 select_index.insert(select_index.end(),temp.begin(),temp.begin()+num_rand_blocks);
             }
             else{
-                temp.erase(temp.begin()+i-2,temp.begin()+i);
-                std::shuffle(temp.begin(),temp.end(),std::mt19937{ std::random_device{}()});
-                select_index.insert(select_index.end(),temp.begin(),temp.begin()+num_rand_blocks);
+                // if(seq_len_index == 1){
+                //     std::cout<<i<<std::endl;
+                //     std::cout<<temp<<std::endl;
+                // }
+                temp.erase(temp.begin()+i-1,temp.begin()+i+2);
+                // if(seq_len_index == 1){
+                //     std::cout<<i<<std::endl;
+                //     std::cout<<temp<<std::endl;
+                // }
+                std::shuffle(temp.begin()+1,temp.end()-1,std::mt19937{ std::random_device{}()});
+                select_index.insert(select_index.end(),temp.begin()+1,temp.begin()+num_rand_blocks+1);
             }
 
         }
         select_block_position_index.push_back(select_index.size());
+    }
     }
     select_index_tensor = torch::from_blob(select_index.data(),{int(select_index.size())},
     at::TensorOptions().dtype(torch::kInt)).clone().to(at::kCUDA);
@@ -108,8 +119,8 @@ int block_size, int num_rand_blocks,int last_idx) const{
 
 void MultiHeadedAttention::FuseGemm012AddBIasTranspose(
     const torch::Tensor& input_tensor, torch::Tensor& q_out, 
-    torch::Tensor& k_out, torch::Tensor& v_out, int total_seq_len, int d_num) const{
-
+    torch::Tensor& k_out, torch::Tensor& v_out, torch::Tensor &seq_len_info_tensor, int total_seq_len, int d_num) const{
+    
     torch::Tensor tmp_qkv_out1 = torch::zeros({total_seq_len,3*d_num},torch::kFloat).to(torch::kCUDA);
 
     kernels::MatMul(input_tensor,false,qkv_weight_,false,1,tmp_qkv_out1,0);
@@ -117,38 +128,40 @@ void MultiHeadedAttention::FuseGemm012AddBIasTranspose(
     kernels::test_add_bias_and_transpose(reinterpret_cast<float*>(qkv_bias_.data_ptr()),
     reinterpret_cast<float*>(tmp_qkv_out1.data_ptr()),reinterpret_cast<float*>(q_out.data_ptr()),
     reinterpret_cast<float*>(k_out.data_ptr()),reinterpret_cast<float*>(v_out.data_ptr()),
-    0,d_num,d_num*2,1,total_seq_len,head_num_,block_size_,block_num_,head_size_);
+    0,d_num,d_num*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),batch_size_,head_num_,block_size_,block_num_,head_size_);
 
 }
 
 void MultiHeadedAttention::operator()(
     const torch::Tensor& input_tensor, const torch::Tensor attention_mask,
     const std::string attn_type, torch::Tensor &output, torch::Tensor att_score,
-    const torch::Tensor seq_len_info, const int total_seq_len, 
-    const int head_num, const int head_size, const int block_num, const int block_size, 
-    const int d_num) const {
-    
-    torch::Tensor select_index_tensor,select_index_position_tensor;
+    const std::vector<int> seq_len_info,torch::Tensor &seq_len_info_tensor, const int head_size, const int block_size, const int d_num, const torch::Tensor &from_select_index_position_tensor,
+    const torch::Tensor &from_select_index_tensor ) const {
 
+    std::cout<<seq_len_info<<std::endl;
+    total_seq_len_ = seq_len_info.back()*block_size;
+    batch_size_ = seq_len_info.size()-1;
+    head_num_ = d_num/head_size;
+    d_num_ = d_num;
+    block_size_ = block_size;
+    head_size_ = head_size;
+    block_num_ =  seq_len_info.back();
+
+    
+    torch::Tensor to_select_index_tensor,to_select_index_position_tensor;
+    
     torch::Tensor a;
     std::thread t1(&layers::MultiHeadedAttention::GenerateSparseBlockIndex,this,
-    std::ref(select_index_tensor),std::ref(select_index_position_tensor),std::ref(a),
-    total_seq_len,block_size,3,1024);
+    std::ref(to_select_index_tensor),std::ref(to_select_index_position_tensor),seq_len_info,
+    total_seq_len_,block_size,3);
     // td::thread t1(&MultiHeadedAttention::GenerateSparseBlockIndex,this,111);
     t1.detach();
 
 
-    total_seq_len_ = total_seq_len;
-    head_num_ = head_num;
-    d_num_ = d_num;
-    block_size_ = block_size;
-    head_size_ = head_size;
-    block_num_ = block_num;
-
-    torch::Tensor q_out =torch::zeros({total_seq_len,d_num},torch::kFloat).to(torch::kCUDA);
-    torch::Tensor k_out =torch::zeros({total_seq_len,d_num},torch::kFloat).to(torch::kCUDA);
-    torch::Tensor v_out =torch::zeros({total_seq_len,d_num},torch::kFloat).to(torch::kCUDA);
-    FuseGemm012AddBIasTranspose(input_tensor,q_out,k_out,v_out,4096,768);
+    torch::Tensor q_out =torch::zeros({total_seq_len_,d_num},torch::kFloat).to(torch::kCUDA);
+    torch::Tensor k_out =torch::zeros({total_seq_len_,d_num},torch::kFloat).to(torch::kCUDA);
+    torch::Tensor v_out =torch::zeros({total_seq_len_,d_num},torch::kFloat).to(torch::kCUDA);
+    FuseGemm012AddBIasTranspose(input_tensor,q_out,k_out,v_out,seq_len_info_tensor,total_seq_len_,d_num_);
     // std::cout<<1<<std::endl;
     while(!sparse_index){
 
@@ -156,15 +169,16 @@ void MultiHeadedAttention::operator()(
     
     sparse_index = false;
 
-    std::cout<<select_index_tensor<<std::endl;
-    std::cout<<select_index_position_tensor<<std::endl;
+    // std::cout<<partition_part_index_tensor<<std::endl;
+    // std::cout<<partition_part_tensor<<std::endl;
+    // std::cout<<select_index_tensor<<std::endl;
+    // std::cout<<select_index_position_tensor<<std::endl;
 
-    torch::Tensor attention_out = torch::zeros({total_seq_len,d_num},torch::kFloat).to(torch::kCUDA);
-
-    kernels::test_gemm_(reinterpret_cast<float*>(q_out.data_ptr()),reinterpret_cast<float*>(k_out.data_ptr()),
-    reinterpret_cast<float*>(v_out.data_ptr()),reinterpret_cast<float*>(attention_out.data_ptr()),
-    reinterpret_cast<int*>(select_index_tensor.data_ptr()),reinterpret_cast<int*>(select_index_position_tensor.data_ptr()),
-    block_num,head_num,block_size,head_size);
+    torch::Tensor attention_out = torch::zeros({total_seq_len_,d_num},torch::kFloat).to(torch::kCUDA);
+    // kernels::test_gemm_(reinterpret_cast<float*>(q_out.data_ptr()),reinterpret_cast<float*>(k_out.data_ptr()),
+    // reinterpret_cast<float*>(v_out.data_ptr()),reinterpret_cast<float*>(attention_out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),
+    // reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),
+    // block_num_,head_num_,block_size,head_size);
     // std::cout<<2<<std::endl;
 
     // std::cout<<attention_out.sizes()<<std::endl;

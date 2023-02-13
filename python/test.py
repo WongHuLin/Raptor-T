@@ -48,8 +48,41 @@ def test_BertLayer():
 # def test_BertEncoder():
 bertEncoder = BertEncoder.from_torch(model.encoder)
 hidden_states = torch.rand(4096,768).to(device)
-for i in range(0,10):
-    output = bertEncoder(hidden_states,4096)
+    # for i in range(0,10):
+output = bertEncoder(hidden_states,4096)
 
 # output = model.encoder.layer[0].attention.output
 # input_tensor = torch.rand(2,768).to(device)
+
+# block_num_array = [64,7,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,7,64,10,7,8,8,8,8,8,8,7,10]
+
+# thread_block_num = 160
+# seq_start_index = [(0,64),(64,10)]
+
+# import heapq
+
+# def equal_division(block_num_array:list,seq_start_index:list,thread_block_num:int,head_num:int):
+#     sorted_nums = sorted(enumerate(block_num_array), key=lambda x: x[1],reverse=True)
+#     index = [i[0] for i in sorted_nums]
+#     sorted_value = [i[1] for i in sorted_nums]
+#     partition_part = [[] for i in range(0,thread_block_num)]
+#     min_heap = [(0,i) for i in range(0,thread_block_num)]
+#     for i in range(0,len(sorted_value)):
+#         for j in range(0,head_num):
+#             pop_element = heapq.heappop(min_heap)
+#             start_index = (0,0)
+#             for k in seq_start_index:
+#                 if(index[i] >= k[0]):
+#                     start_index = k
+#                 else:
+#                     break
+#             partition_part[pop_element[1]].append(index[i] - start_index[0] +j*start_index[1]+start_index[0]*head_num)
+#             pop_element = (pop_element[0]+sorted_value[i],pop_element[1])
+#             heapq.heappush(min_heap,pop_element)
+#     return partition_part
+
+# partition_part = equal_division(block_num_array,seq_start_index,160,12)
+# len_ = [len(it) for it in partition_part]
+# len_ = [sum(len_[0:i]) for i in range(0,len(len_)+1)]
+
+# partition_part_ = reduce(operator.add, partition_part)

@@ -1,6 +1,10 @@
 #add_executable(kernel_test test.cpp)
 add_library(kernels OBJECT
-    attention.cu mat_mul.cpp
+    add_bias_act.cu
+    add_bias_and_layernorm.cu
+    add_bias_and_transpose.cu
+    sparse_attention.cu
+    mat_mul.cpp
     )
 target_link_libraries(kernels "${TORCH_LIBRARIES}")
 # add_library(test_lib OBJECT
@@ -20,7 +24,10 @@ target_link_libraries(kernels "${TORCH_LIBRARIES}")
 #             PATHS /home/wong/TurboTransformers/libtorch
 #             NO_DEFAULT_PATH)
 # add_library(kernels OBJECT
-#     attention.cu
+#     add_bias_act.cu
+#     add_bias_and_layernorm.cu
+#     add_bias_and_transpose.cu
+#     sparse_attention.cu
 #     )
 # target_link_libraries(kernels "${TORCH_LIBRARIES}")
 

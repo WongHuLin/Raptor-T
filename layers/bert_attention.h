@@ -15,6 +15,7 @@
 
 #include <torch/torch.h>
 #include "./multi_headed_attention.h"
+#include <vector>
 
 namespace sparse_transformers {
 namespace layers {
@@ -40,8 +41,9 @@ class BertAttention : public MultiHeadedAttention {
   }
 
     void operator()(const torch::Tensor &input_tensor,
-                  const torch::Tensor &attention_mask, torch::Tensor &output,
-                  const int total_seq_len) const;
+        const torch::Tensor &attention_mask, torch::Tensor &output, 
+        const std::vector<int> seq_position_info,torch::Tensor &seq_len_info_tensor, const torch::Tensor &partition_part_index_tensor,
+        const torch::Tensor &partition_part_tensor ) const;
 
     mutable int64_t head_num_;
     mutable int64_t d_num_;

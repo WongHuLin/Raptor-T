@@ -18,10 +18,10 @@ namespace kernels {
 template <class DataType>
 __global__ void add_bias_and_transpose(DataType *input_data, DataType *bias, 
     DataType *q, DataType *k, DataType *v, int q_offset, int k_offset, 
-    int v_offset,int batch_size, int seq_len, int head_num, int block_size, 
+    int v_offset,int *seq_len_info,int batch_size, int head_num, int block_size, 
     int head_size, int block_num){
-    // For K and V: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * blcok_size * head_size
-    // For Q: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * head_size* blcok_size
+    // For K and V: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * block_size * head_size
+    // For Q: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * head_size* block_size
     const int tidy = threadIdx.y;
     const int tidx = threadIdx.x;
     const int bidx = blockIdx.x;
@@ -30,6 +30,25 @@ __global__ void add_bias_and_transpose(DataType *input_data, DataType *bias,
     const int start_read_data_index = bidy * block_size * head_size * 3 * head_num + bidx * head_size;
     const int start_write_data_index = bidx * block_num * block_size * head_size + bidy * block_size * head_size;
     __shared__ float q_bias[64],k_bias[64],v_bias[64];
+
+    int read_seq_data_start = 0;
+    int write_seq_data_start = 0;
+
+    for(int i=1;i<batch_size+1;i++)
+        if(bidy >= seq_len_info[i])
+            continue;
+        else{
+            int seq_start_index = seq_len_info[i-1];
+            int seq_len_index = bidy - seq_start_index;  //seq内的index
+            int len = (seq_len_info[i] - seq_len_info[i-1]); //seq 的长度
+            // 数据开始读取为：seq的开始位置 + 当前token block的index开始位置 + 
+            read_seq_data_start =  seq_start_index*block_size*head_num*head_size*3 + seq_len_index*block_size*head_num*head_size*3 + bidx*head_size;
+            write_seq_data_start = seq_start_index*block_size*head_num*head_size + bidx*len*block_size*head_size + seq_len_index*block_size*head_size;
+            // if(tidx == 0 && tidy == 0){
+            //     printf("%d %d %d %d %d %d\n",bidx,bidy,seq_start_index*block_size*head_num*head_size,bidx*len*block_size*head_size, seq_len_index*block_size*head_size,write_seq_data_start);
+            // }
+            break;
+        }
 
     // load bias
     auto block = cooperative_groups::this_thread_block();
@@ -45,7 +64,7 @@ __global__ void add_bias_and_transpose(DataType *input_data, DataType *bias,
 
             int smem_row_index = smem_index / 32;
             int smem_col_index = smem_index % 32;
-            int read_index = start_read_data_index + head_num*head_size*3*(block_row+smem_row_index) + block_col + smem_col_index;
+            int read_index = read_seq_data_start + head_num*head_size*3*(block_row+smem_row_index) + block_col + smem_col_index;
             // load q k v
 
             FLOAT4(smem_k[smem_index]) = FLOAT4(input_data[read_index+k_offset]);
@@ -62,32 +81,40 @@ __global__ void add_bias_and_transpose(DataType *input_data, DataType *bias,
                 smem_q[(tidy*4+i)][tidx] += q_bias[tidx+block_col];
             }
 
-            int write_index = start_write_data_index + (block_row+smem_row_index)*head_size + block_col + smem_col_index;
+            int write_index = write_seq_data_start + (block_row+smem_row_index)*head_size + block_col + smem_col_index;
+            // if(tidx == 0 && tidy == 0 && block_row == 0 && block_col == 0){
+            //     printf("%d %d %f\n",bidx,write_index,smem_k[0]);
+            // }
+            // __syncthreads();
             FLOAT4(k[write_index]) = FLOAT4(smem_k[smem_index]);
             FLOAT4(v[write_index]) = FLOAT4(smem_v[smem_index]);
 
             __syncthreads();
+            // if(bidx == 0 && bidy == 0  && block_col == 0){
+            //     printf("%d %d %d %d %d %d %f\n",tidx,tidy,block_row,block_col,write_seq_data_start,write_seq_data_start + (tidy*4+1+block_col)*head_size + tidx + block_row,smem_q[tidx][(tidy*4+1)]);
+            // }
             for(int i=0;i<4;i++){
-                q[start_write_data_index + (tidy*4+i+block_col)*64 + tidx + block_row] = smem_q[tidx][(tidy*4+i)];
+                q[write_seq_data_start + (tidy*4+i+block_col)*head_size + tidx + block_row] = smem_q[tidx][(tidy*4+i)];
+                // if(write_seq_data_start + (tidy*4+i+block_col)*head_size + tidx + block_row == 3079)
+                //     printf("%d %d %d %d %d 3079 %f \n",bidx,bidy,tidx,tidy,write_seq_data_start,smem_q[tidx][(tidy*4+i)]);
             }
             __syncthreads();
         }
     }
 }
 
-void test_add_bias_and_transpose(float *bias,float *input_data,float *q, float *k,float *v, int q_offset, int k_offset, int v_offset,int batch_size, int seq_len, int head_num, int block_size,int block_num, int head_size){
+void test_add_bias_and_transpose(float *bias,float *input_data,float *q, float *k,float *v, int q_offset, int k_offset, int v_offset,int *seq_len_info,int batch_size, int head_num, int block_size,int block_num, int head_size){
     cudaEvent_t start,stop;
     cudaEventCreate( &start );
     cudaEventCreate( &stop ) ;
     cudaEventRecord( start, 0 ) ;
-    add_bias_and_transpose<float><<<dim3(head_num,block_num),dim3(32,8)>>>(input_data,bias,q,k,v,q_offset,k_offset,v_offset,batch_size,seq_len,head_num,block_size,head_size,block_num);
+    add_bias_and_transpose<float><<<dim3(head_num,block_num),dim3(32,8)>>>(input_data,bias,q,k,v,q_offset,k_offset,v_offset,seq_len_info,batch_size,head_num,block_size,head_size,block_num);
     cudaEventRecord(stop,0);
     float elapsedTime;
     cudaEventSynchronize(stop);
     cudaDeviceSynchronize();
     cudaEventElapsedTime(&elapsedTime, start, stop);
     printf( "Time to generate:  %f ms\n", elapsedTime );
-
 }
 }
 }

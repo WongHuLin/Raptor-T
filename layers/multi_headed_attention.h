@@ -76,8 +76,8 @@ public:
     }
 
     void GenerateSparseBlockIndex(torch::Tensor& select_index_tensor, 
-    torch::Tensor& select_index_position_tensor, const torch::Tensor& seq_len_info,
-    int total_seq_len, int block_size, int num_rand_blocks,int last_idx=-1) const;
+    torch::Tensor& select_index_position_tensor, std::vector<int> seq_len_info,
+    int total_seq_len, int block_size, int num_rand_blocks) const;
 
 
     void SetContextFlag(
@@ -89,14 +89,13 @@ public:
 
     void FuseGemm012AddBIasTranspose(
     const torch::Tensor& input_tensor, torch::Tensor& q_out, 
-    torch::Tensor& k_out, torch::Tensor& v_out, int total_seq_len, int d_num) const;
-
+    torch::Tensor& k_out, torch::Tensor& v_out, torch::Tensor &seq_len_info_tensor, int total_seq_len, int d_num) const;
+    
     void operator()(
     const torch::Tensor& input_tensor, const torch::Tensor attention_mask,
     const std::string attn_type, torch::Tensor &output, torch::Tensor att_score,
-    const torch::Tensor seq_len_info, const int total_seq_len, 
-    const int head_num, const int head_size, const int block_num, const int block_size, 
-    const int d_num) const;
+    const std::vector<int> seq_len_info,torch::Tensor &seq_len_info_tensor, const int head_size, const int block_size, const int d_num, const torch::Tensor &partition_part_index_tensor,
+    const torch::Tensor &partition_part_tensor ) const ;
 
 private:
     torch::Tensor k_weight_;
@@ -117,29 +116,18 @@ private:
 
     int64_t num_attention_heads_;
 
-    mutable int64_t total_seq_len_;
-    mutable int64_t head_num_;
-    mutable int64_t d_num_;
-    mutable int64_t block_size_; 
-    mutable int64_t head_size_;
-    mutable int64_t block_num_; 
+    mutable int total_seq_len_;
+    mutable int head_num_;
+    mutable int d_num_;
+    mutable int block_size_; 
+    mutable int head_size_;
+    mutable int block_num_; 
+    mutable int batch_size_;
     mutable bool sparse_index{false};
 
-    mutable int64_t batch_size_;
-    mutable int64_t query_seq_length_;
-    mutable int64_t key_seq_length_;
-    mutable int64_t hidden_size_;
 
     mutable int64_t size_per_head_;
     // mutable torch::Device devtype_;
-    mutable int devid_;
-
-    mutable bool layer_cache_not_none_{false};
-    mutable bool memory_keys_not_none_{false};
-    mutable bool memory_values_not_none_{false};
-    mutable bool self_keys_not_none_{false};
-    mutable bool self_values_not_none_{false};
-    mutable bool memory_not_none_{false};
 };
 
 }  // namespace layers
