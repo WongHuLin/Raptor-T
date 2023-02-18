@@ -175,7 +175,7 @@ void MultiHeadedAttention::operator()(
     // std::cout<<select_index_position_tensor<<std::endl;
 
     torch::Tensor attention_out = torch::zeros({total_seq_len_,d_num},torch::kFloat).to(torch::kCUDA);
-    // kernels::test_gemm_(reinterpret_cast<float*>(q_out.data_ptr()),reinterpret_cast<float*>(k_out.data_ptr()),
+    // kernels::test_gemm_1(reinterpret_cast<float*>(q_out.data_ptr()),reinterpret_cast<float*>(k_out.data_ptr()),
     // reinterpret_cast<float*>(v_out.data_ptr()),reinterpret_cast<float*>(attention_out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),
     // reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),
     // block_num_,head_num_,block_size,head_size);
