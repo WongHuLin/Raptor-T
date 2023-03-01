@@ -102,9 +102,7 @@ __global__ void add_bias_and_layernorm_1(DataType *out_data, DataType *input_dat
     const int tidx_dim = blockDim.x;
     const int tid = tidy*tidx_dim + tidx;
 
-    const int tidy_dim = blockDim.y;
     const int bidx = blockIdx.x;
-    const int bidy = blockIdx.y;
 
     typedef cub::WarpReduce<float> WarpReduce;
     __shared__ typename WarpReduce::TempStorage temp_storage[6];
@@ -186,17 +184,17 @@ __global__ void add_bias_and_layernorm_1(DataType *out_data, DataType *input_dat
 
 }
 void test_add_bias_and_layernorm(float *out,float *input_data, float *bias,int seq_len, int handle_row, int normalized_len, float eps,float* layernorm_weight,float* layernorm_bias){
-    cudaEvent_t start,stop;
-    cudaEventCreate( &start );
-    cudaEventCreate( &stop ) ;
-    cudaEventRecord( start, 0 ) ;
+    // cudaEvent_t start,stop;
+    // cudaEventCreate( &start );
+    // cudaEventCreate( &stop ) ;
+    // cudaEventRecord( start, 0 ) ;
     add_bias_and_layernorm_1<float><<<dim3(seq_len/handle_row),dim3(32,6)>>>(out,input_data,bias,seq_len,handle_row,normalized_len,eps,layernorm_weight,layernorm_bias);
-    cudaEventRecord(stop,0);
-    float elapsedTime;
-    cudaEventSynchronize(stop);
-    cudaDeviceSynchronize();
-    cudaEventElapsedTime(&elapsedTime, start, stop);
-    printf( "Time to generate:  %f ms\n", elapsedTime );
+    // cudaEventRecord(stop,0);
+    // float elapsedTime;
+    // cudaEventSynchronize(stop);
+    // cudaDeviceSynchronize();
+    // cudaEventElapsedTime(&elapsedTime, start, stop);
+    // printf( "Time to generate:  %f ms\n", elapsedTime );
 
 }
 }

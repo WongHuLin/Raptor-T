@@ -2,6 +2,8 @@
 #include <memory>
 #include <utility>
 #include <torch/torch.h>
+#include <cublas_v2.h>
+
 namespace sparse_transformers {
 namespace layers {
 
@@ -13,6 +15,11 @@ class BertOutput {
         dense_bias_(std::move(dense_bias)),
         layer_norm_weight_(std::move(layer_norm_weight)),
         layer_norm_bias_(std::move(layer_norm_bias)) {
+            cublasCreate(&handle_);
+  }
+
+  ~BertOutput(){
+    cublasDestroy(handle_);
   }
 
   void operator()(const torch::Tensor &hidden_states,
@@ -23,6 +30,9 @@ class BertOutput {
   torch::Tensor dense_bias_;
   torch::Tensor layer_norm_weight_;
   torch::Tensor layer_norm_bias_;
+
+  cublasHandle_t handle_;
+
 };
 
 }  // namespace layers

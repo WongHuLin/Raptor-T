@@ -1,6 +1,5 @@
 #include "kernel.h"
 #include "cuda_runtime.h"
-#include "cuda_fp16.h"
 #include <cuda_fp16.h>
 #include "device_launch_parameters.h"
 #include <stdio.h>
@@ -90,7 +89,8 @@ __global__ void sparse_attention_with_tensor_core(DataType *a,  DataType *b,  Da
         FLOAT4(smem_q[smem_index_q]) = FLOAT4(a[data_offset_q+global_q_index_i*head_size+global_q_index_j]); 
 
         FLOAT4(out_temp[global_q_index_i - a_bm*A_BM][global_q_index_j]) = FLOAT4(zero4[0]);
-        wmma::fill_fragment(frag_s_out, 0.0);
+        // wmma::fill_fragment(frag_s_out, half(0.0));
+        wmma::fill_fragment(frag_s_out, __float2half(0.0));
         wmma::fill_fragment(frag_out, 0.0);
 
 
@@ -140,7 +140,8 @@ __global__ void sparse_attention_with_tensor_core(DataType *a,  DataType *b,  Da
                 
                 // 计算Q*K
                 // cooperative_groups::wait(block_k);
-                wmma::fill_fragment(frag_s_out, 0.0);
+                wmma::fill_fragment(frag_s_out, __float2half(0.0));
+
                 if(tidy % 2 == 0){
                     wmma::load_matrix_sync(frag_k[0], &smem_k[0], 16);
                     wmma::load_matrix_sync(frag_k[1], &smem_k[16*32], 16);
@@ -156,7 +157,8 @@ __global__ void sparse_attention_with_tensor_core(DataType *a,  DataType *b,  Da
                 __syncthreads();
 
                 for(int i=0;i<4;i++){
-                    temp_score[i*8+tidy][tidx] = __half2float(smem_temp_half[i*8+tidy][tidx] + smem_temp_half[i*8+tidy+32][tidx]);
+                    // temp_score[i*8+tidy][tidx] = __half2float(smem_temp_half[i*8+tidy][tidx] + smem_temp_half[i*8+tidy+32][tidx]);
+                    temp_score[i*8+tidy][tidx] = __half2float(smem_temp_half[i*8+tidy][tidx]) + __half2float(smem_temp_half[i*8+tidy+32][tidx]);
                 }
 
                 //加载下一次使用的数据
@@ -262,7 +264,7 @@ __global__ void sparse_attention_with_tensor_core(DataType *a,  DataType *b,  Da
         // 结果写入global mem
         #pragma unroll
         for(int i=0;i<8;i+=1){
-            out[data_offset_q+(a_bm*A_BM+index_x+i)*head_size+index_y] = out_temp[(index_x+i)][index_y] / global_sum_scores[index_x+i];
+            out[data_offset_q+(a_bm*A_BM+index_x+i)*head_size+index_y] = __float2half(out_temp[(index_x+i)][index_y] / global_sum_scores[index_x+i]);
         }
         __syncthreads();
     }
@@ -487,7 +489,7 @@ __global__ void sparse_attention(DataType *a,  DataType *b,  DataType *c,
 }
     //(12,64)(32*8)  a is transpose 
 template <class DataType>
-__global__ void sparse_attention_(DataType *a,  DataType *b,  DataType *c, 
+__global__ void sparse_attention_(half *a,  half *b,  half *c, 
     DataType *out,const int *seq_len_info,const int *from_block_index, const int *from_block_index_position, const int *to_select_index,const int *to_select_index_position, const int batch_size,
     const int block_size,const int head_size,const int select_block_num){
 
@@ -495,8 +497,6 @@ __global__ void sparse_attention_(DataType *a,  DataType *b,  DataType *c,
     const int tidy = threadIdx.y;
     const int tidx = threadIdx.x;
     const int bidx = blockIdx.x;
-    const int b_dimx = 8;
-    const int g_dimy = gridDim.y;
 
     const int A_BM = 32;
     const int A_BK = 64;
@@ -583,7 +583,9 @@ __global__ void sparse_attention_(DataType *a,  DataType *b,  DataType *c,
             FLOAT4(smem_q[smem_index_q]) = FLOAT4(a[data_offset_q+global_q_index_i*head_size+global_q_index_j]); 
     
             FLOAT4(out_temp[global_q_index_i - a_bm*A_BM][global_q_index_j]) = FLOAT4(zero4[0]);
-            wmma::fill_fragment(frag_s_out, 0.0);
+            // wmma::fill_fragment(frag_s_out, 0.0);
+            wmma::fill_fragment(frag_s_out, __float2half(0.0));
+
             wmma::fill_fragment(frag_out, 0.0);
     
     
@@ -632,7 +634,7 @@ __global__ void sparse_attention_(DataType *a,  DataType *b,  DataType *c,
                 for(int b_bn=0;b_bn<block_size/32;b_bn++){
                     // 计算Q*K
                     // cooperative_groups::wait(block_k);
-                    wmma::fill_fragment(frag_s_out, 0.0);
+                    wmma::fill_fragment(frag_s_out, __float2half(0.0));
                     if(tidy % 2 == 0){
                         wmma::load_matrix_sync(frag_k[0], &smem_k[0], 16);
                         wmma::load_matrix_sync(frag_k[1], &smem_k[16*32], 16);
@@ -648,7 +650,7 @@ __global__ void sparse_attention_(DataType *a,  DataType *b,  DataType *c,
                     __syncthreads();
 
                     for(int i=0;i<4;i++){
-                        temp_score[i*8+tidy][tidx] = __half2float(smem_temp_half[i*8+tidy][tidx] + smem_temp_half[i*8+tidy+32][tidx]);
+                        temp_score[i*8+tidy][tidx] = __half2float(smem_temp_half[i*8+tidy][tidx]) + __half2float(smem_temp_half[i*8+tidy+32][tidx]);
                     }
 
                     //加载下一次使用的数据
@@ -764,29 +766,23 @@ __global__ void sparse_attention_(DataType *a,  DataType *b,  DataType *c,
     }
 }              
       
-void test_gemm_1(half *a, half *b,half *c, half *out,int *seq_len_info,int *from_select_index,int *from_select_index_position,int *to_select_index,int *to_select_index_position, int block_num, int head_num,int block_size,int head_size)
+void test_gemm_1(half *a, half *b,half *c, float *out,int *seq_len_info,int *from_select_index,int *from_select_index_position,int *to_select_index,int *to_select_index_position,int block_limit, int block_num, int head_num,int block_size,int head_size)
 {
-    // std::cout<<*a<<std::endl;
-    // sparse_attention<float><<<dim3(block_num,head_num),dim3(11,32)>>>(a,b,c,out,to_select_index,64,64);
 
-    cudaEvent_t start,stop;
-    cudaEventCreate( &start );
-    cudaEventCreate( &stop ) ;
-    // test_gemm<float><<<1,dim3(11,32)>>>(a,b,c,m,n,k,64);
 
-    cudaEventRecord( start, 0 ) ;
+    // cudaEvent_t start,stop;
+    // cudaEventCreate( &start );
+    // cudaEventCreate( &stop ) ;
+    // cudaEventRecord( start, 0 ) ;
     // 修改成最大线程块数量 80 * 2
-    sparse_attention_<half><<<dim3(160),dim3(32,8)>>>(a,b,c,out,seq_len_info,from_select_index,from_select_index_position,to_select_index,to_select_index_position,2,64,64,11);
+    sparse_attention_<float><<<dim3(block_limit),dim3(32,8)>>>(a,b,c,out,seq_len_info,from_select_index,from_select_index_position,to_select_index,to_select_index_position,2,64,64,11);
 
-    // test_gpu<<<1,1>>>();
-    // test_cpu();
-    cudaEventRecord(stop,0);
-    float elapsedTime;
-    cudaEventSynchronize(stop);
-    cudaDeviceSynchronize();
-    cudaEventElapsedTime(&elapsedTime, start, stop);
-    printf( "Time to generate:  %f ms\n", elapsedTime );
-    // printf("%f\n",*a);
+    // cudaEventRecord(stop,0);
+    // float elapsedTime;
+    // cudaEventSynchronize(stop);
+    // cudaDeviceSynchronize();
+    // cudaEventElapsedTime(&elapsedTime, start, stop);
+    // printf( "Time to generate:  %f ms\n", elapsedTime );
 }
 
 void test_gemm_(float *a, float *b,float *c, float *out,int *to_select_index,int *to_select_index_position, int block_num, int head_num,int block_size,int head_size)

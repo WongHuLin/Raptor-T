@@ -1,8 +1,10 @@
 #include <torch/extension.h>
+// #include "../layers/tensor_set.h"
 #include "../layers/bert_attention.h"
 #include "../layers/bert_intermediate.h"
 #include "../layers/bert_output.h"
 #include "../layers/bert_pooler.h"
+#include "../layers/metadata.h"
 
 
 namespace sparse_transformers {
@@ -12,11 +14,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
     pybind11::class_<layers::BertAttention>(m,"BertAttention")
         .def(pybind11::init([](torch::Tensor &qkv_weight, torch::Tensor &qkv_bias, torch::Tensor &dense_weight, torch::Tensor &dense_bias,
                 torch::Tensor &layer_norm_weight, torch::Tensor &layer_norm_bias,
-                int64_t num_attention_heads) -> layers::BertAttention * {
+                int64_t num_attention_heads, int layer_idx) -> layers::BertAttention * {
                     return new layers::BertAttention(
                         std::move(qkv_weight), std::move(qkv_bias), std::move(dense_weight),
                         std::move(dense_bias), std::move(layer_norm_weight),
-                        std::move(layer_norm_bias), num_attention_heads);
+                        std::move(layer_norm_bias), num_attention_heads,layer_idx);
         }))
         .def("__call__", &layers::BertAttention::operator());
     
@@ -61,6 +63,22 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
                         std::move(dense_weight), std::move(dense_bias));
         }))
         .def("__call__", &layers::BertPooler::operator());
+
+    pybind11::class_<layers::TensorSet>(m,"TensorSet")
+        .def(pybind11::init([](int64_t total_seq_len, int64_t to_select_index_len, int64_t to_select_index_position_len) -> layers::TensorSet * {
+                    return new layers::TensorSet(total_seq_len, to_select_index_len, to_select_index_position_len);
+        }))
+        .def("update_tensor_set", &layers::TensorSet::update_tensor_set)
+        .def_static("get_instance",&layers::TensorSet::get_instance);
+
+    pybind11::class_<layers::MetaData>(m,"MetaData")
+        .def(pybind11::init([]() -> layers::MetaData *{
+                    return new layers::MetaData();
+        }))
+        .def("update_meta_data",&layers::MetaData::update_meta_data)
+        .def("terminate_thread",&layers::MetaData::terminate_thread);
+        
+        
 }
 }
 }
