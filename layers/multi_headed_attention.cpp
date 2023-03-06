@@ -151,11 +151,11 @@ void MultiHeadedAttention::FuseGemm012AddBIasTranspose(
     kernels::MatMul(input_tensor,false,qkv_weight_,false,1,tmp_qkv_out1,0,handle_,"FuseGemm012AddBIasTranspose_MatMul");
     nvtxRangePop();
     nvtxRangePushA("FuseGemm012AddBIasTranspose_add_bias");
-
-    kernels::test_add_bias_and_transpose(reinterpret_cast<float*>(qkv_bias_.data_ptr()),
-    reinterpret_cast<float*>(tmp_qkv_out1.data_ptr()),reinterpret_cast<half*>(q_out.data_ptr()),
-    reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),
-    0,d_num,d_num*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),batch_size_,head_num_,block_size_,block_num_,head_size_);
+    if(qkv_bias_.dtype() == torch::kFloat)
+        kernels::test_add_bias_and_transpose(reinterpret_cast<float*>(qkv_bias_.data_ptr()),reinterpret_cast<float*>(tmp_qkv_out1.data_ptr()),reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),0,d_num,d_num*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),batch_size_,head_num_,block_size_,block_num_,head_size_);
+    else{
+        kernels::test_add_bias_and_transpose(reinterpret_cast<half*>(qkv_bias_.data_ptr()),reinterpret_cast<half*>(tmp_qkv_out1.data_ptr()),reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),0,d_num,d_num*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),batch_size_,head_num_,block_size_,block_num_,head_size_);
+    }
     nvtxRangePop();
 
 }
@@ -219,10 +219,11 @@ void MultiHeadedAttention::operator()(
     // std::cout<<select_index_position_tensor<<std::endl;
     nvtxRangePushA("test_gemm_1");
     torch::Tensor attention_out = tensor_set->get_tensor("attention_out");
-    kernels::test_gemm_1(reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),
-    reinterpret_cast<half*>(v_out.data_ptr()),reinterpret_cast<float*>(attention_out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),
-    reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),block_limit,
-    block_num_,head_num_,block_size,head_size);
+    if(attention_out.dtype() == torch::kFloat)
+        kernels::test_gemm_1(reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),reinterpret_cast<float*>(attention_out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),block_limit,block_num_,head_num_,block_size,head_size);
+    else{
+        kernels::test_gemm_1(reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),reinterpret_cast<half*>(attention_out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),block_limit,block_num_,head_num_,block_size,head_size);
+    }
 
     // std::cout<<2<<std::endl;
     nvtxRangePop();
@@ -242,12 +243,11 @@ void MultiHeadedAttention::operator()(
     nvtxRangePushA("test_add_bias_and_layernorm");
 
     //layernorm
-    kernels::test_add_bias_and_layernorm(reinterpret_cast<float*>(output.data_ptr()),
-    reinterpret_cast<float*>(output.data_ptr()),reinterpret_cast<float*>(dense_bias_.data_ptr()),
-    total_seq_len_,2,d_num_,float(1e-5),reinterpret_cast<float*>(layernorm_gamma_.data_ptr()),
-    reinterpret_cast<float*>(layernorm_beta_.data_ptr()));
-    // std::cout<<4<<std::endl;
-
+    if(dense_bias_.dtype() == torch::kFloat)
+        kernels::test_add_bias_and_layernorm(reinterpret_cast<float*>(output.data_ptr()),reinterpret_cast<float*>(output.data_ptr()),reinterpret_cast<float*>(dense_bias_.data_ptr()),total_seq_len_,2,d_num_,float(1e-5),reinterpret_cast<float*>(layernorm_gamma_.data_ptr()),reinterpret_cast<float*>(layernorm_beta_.data_ptr()));
+    else{
+        kernels::test_add_bias_and_layernorm(reinterpret_cast<half*>(output.data_ptr()),reinterpret_cast<half*>(output.data_ptr()),reinterpret_cast<half*>(dense_bias_.data_ptr()),total_seq_len_,2,d_num_,float(1e-5),reinterpret_cast<half*>(layernorm_gamma_.data_ptr()),reinterpret_cast<half*>(layernorm_beta_.data_ptr()));
+    }
     nvtxRangePop();
 
 

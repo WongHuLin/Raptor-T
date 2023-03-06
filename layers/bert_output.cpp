@@ -19,11 +19,10 @@ void BertOutput::operator()(const torch::Tensor &hidden_states,
     kernels::MatMul(hidden_states, false, dense_weight_, false, 1.0,
                   output_tensor, 0.0,handle_,"BertOutput");
     int seq_len = input_tensor.sizes()[0];
-
-    kernels::test_add_bias_and_layernorm(reinterpret_cast<float*>(output_tensor.data_ptr()),
-    reinterpret_cast<float*>(input_tensor.data_ptr()),reinterpret_cast<float*>(dense_bias_.data_ptr()),
-    seq_len,2,768,float(1e-5),reinterpret_cast<float*>(layer_norm_weight_.data_ptr()),
-    reinterpret_cast<float*>(layer_norm_bias_.data_ptr()));
+    if(dense_bias_.dtype() == torch::kFloat)
+      kernels::test_add_bias_and_layernorm(reinterpret_cast<float*>(output_tensor.data_ptr()),reinterpret_cast<float*>(input_tensor.data_ptr()),reinterpret_cast<float*>(dense_bias_.data_ptr()),seq_len,2,768,float(1e-5),reinterpret_cast<float*>(layer_norm_weight_.data_ptr()),reinterpret_cast<float*>(layer_norm_bias_.data_ptr()));
+    else
+      kernels::test_add_bias_and_layernorm(reinterpret_cast<half*>(output_tensor.data_ptr()),reinterpret_cast<half*>(input_tensor.data_ptr()),reinterpret_cast<half*>(dense_bias_.data_ptr()),seq_len,2,768,float(1e-5),reinterpret_cast<half*>(layer_norm_weight_.data_ptr()),reinterpret_cast<half*>(layer_norm_bias_.data_ptr()));
 
 }
 

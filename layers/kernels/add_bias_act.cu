@@ -9,6 +9,8 @@
 // #include <cub/cub.cuh>
 #define FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
 #define FLOAT(pointer) (reinterpret_cast<float*>(&(pointer)))
+#define HALF(pointer) (reinterpret_cast<half*>(&(pointer)))
+#define HALF2(pointer) (reinterpret_cast<half2*>(&(pointer)))
 
 namespace sparse_transformers {
 namespace layers {
@@ -16,7 +18,6 @@ namespace kernels {
 
 template <typename T, ActivationType ActType>
 __inline__ __device__ T ActivationOp(const T& x);
-
 
 template <>
 __inline__ __device__ float ActivationOp<float,ActivationType::Gelu>(const float& x){
@@ -37,28 +38,28 @@ __inline__ __device__ float ActivationOp<float,ActivationType::Relu>(const float
 }
 
 template <>
-__inline__ __device__ half ActivationOp<half,ActivationType::Gelu>(const half& x){
-    half cdf =
-    0.5f *
-    (1.0f + tanhf((0.7978845608028654f * (x + 0.044715f * x * x * x))));
-    return x * cdf;
+__inline__ __device__ half ActivationOp<half,ActivationType::Gelu>(const half& x_h){
+    float x = __half2float(x_h);
+    float cdf =
+    0.5 *
+    (1.0 + tanhf((0.7978845608028654f * (x + 0.044715f * x * x * x))));
+    return __float2half(x * cdf);
 }
 
 template <>
-__inline__ __device__ half ActivationOp<half,ActivationType::Tanh>(const half& x){
-    return tanhf(x);
+__inline__ __device__ half ActivationOp<half,ActivationType::Tanh>(const half& x_h){
+    float x = __half2float(x_h);
+    return __float2half(tanhf(x));
 }
 
 template <>
-__inline__ __device__ half ActivationOp<half,ActivationType::Relu>(const half& x){
-    return (x > 0) ? x : 0;
+__inline__ __device__ half ActivationOp<half,ActivationType::Relu>(const half& x_h){
+    float x = __half2float(x_h);
+    return __float2half((x > 0) ? x : 0);
 }
 
-template <typename T, ActivationType ActType>
-__global__ void add_bias_act(T* bias, T* out, int dim_size);
-
-template <>
-__global__ void add_bias_act<float,ActivationType::Gelu>(float* bias, float* out, int dim_size){
+template <ActivationType ActType>
+__global__ void add_bias_act(float* bias, float* out, int dim_size){
     const int tidx = threadIdx.x;
     const int bidx = blockIdx.x;
     
@@ -73,10 +74,31 @@ __global__ void add_bias_act<float,ActivationType::Gelu>(float* bias, float* out
     reg_c.z = reg_a.z + reg_b.z;
     reg_c.w = reg_a.w + reg_b.w;
 
-    reg_c.x = ActivationOp<T,ActType>(reg_c.x);
-    reg_c.y = ActivationOp<T,ActType>(reg_c.y);
-    reg_c.z = ActivationOp<T,ActType>(reg_c.z);
-    reg_c.w = ActivationOp<T,ActType>(reg_c.w);
+    reg_c.x = ActivationOp<float,ActType>(reg_c.x);
+    reg_c.y = ActivationOp<float,ActType>(reg_c.y);
+    reg_c.z = ActivationOp<float,ActType>(reg_c.z);
+    reg_c.w = ActivationOp<float,ActType>(reg_c.w);
+
+    FLOAT4(out[start_index + bidx * dim_size]) = reg_c;
+}
+
+template <ActivationType ActType>
+__global__ void add_bias_act_half(half* bias, half* out, int dim_size){
+    const int tidx = threadIdx.x;
+    const int bidx = blockIdx.x;
+    
+    const int start_index = tidx*8;
+
+    float4 reg_a = FLOAT4(bias[start_index]);
+    float4 reg_b = FLOAT4(out[start_index + bidx * dim_size]);
+    float4 reg_c;
+
+    for(int i=0;i<4;i++)
+    {
+        HALF2(reg_c)[i] = __hadd2(HALF2(reg_a)[i] , HALF2(reg_b)[i]);
+        HALF(reg_c)[i*2] = ActivationOp<half,ActType>(HALF(reg_c)[i*2]);
+        HALF(reg_c)[i*2+1] = ActivationOp<half,ActType>(HALF(reg_c)[i*2+1]);
+    }
 
     FLOAT4(out[start_index + bidx * dim_size]) = reg_c;
 }
@@ -85,7 +107,23 @@ __global__ void add_bias_act<float,ActivationType::Gelu>(float* bias, float* out
 
 void test_add_bias_act(float *bias, float* out, int total_seq_len, int dim_size){
     const int block_num = dim_size / 4;
-    add_bias_act<float,ActivationType::Gelu><<<dim3(total_seq_len),dim3(block_num)>>>(bias,out,dim_size);
+    add_bias_act<ActivationType::Gelu><<<dim3(total_seq_len),dim3(block_num)>>>(bias,out,dim_size);
+}
+
+void test_add_bias_act(half *bias, half* out, int total_seq_len, int dim_size){
+    const int block_num = dim_size / 8;
+    // cudaEvent_t start,stop;
+    // cudaEventCreate( &start );
+    // cudaEventCreate( &stop ) ;
+    // cudaEventRecord( start, 0 ) ;
+    add_bias_act_half<ActivationType::Gelu><<<dim3(total_seq_len),dim3(block_num)>>>(bias,out,dim_size);
+    // cudaEventRecord(stop,0);
+    // float elapsedTime;
+    // cudaEventSynchronize(stop);
+    // cudaDeviceSynchronize();
+    // cudaEventElapsedTime(&elapsedTime, start, stop);
+    // printf( "test_add_bias_act   Time to generate:  %f ms\n", elapsedTime );
+
 }
 }
 }

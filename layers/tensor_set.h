@@ -40,8 +40,8 @@ public:
         tensor_map["q_out"] = torch::empty({total_seq_len_,768},torch::kHalf).to(torch::kCUDA).contiguous();
         tensor_map["k_out"] = torch::empty({total_seq_len_,768},torch::kHalf).to(torch::kCUDA).contiguous();
         tensor_map["v_out"] = torch::empty({total_seq_len_,768},torch::kHalf).to(torch::kCUDA).contiguous();
-        tensor_map["attention_out"] = torch::empty({total_seq_len_,768},torch::kFloat).to(torch::kCUDA).contiguous();
-        tensor_map["tmp_qkv_out1"] = torch::empty({total_seq_len_,768*3},torch::kFloat).to(torch::kCUDA).contiguous();
+        tensor_map["attention_out"] = torch::empty({total_seq_len_,768},torch::kHalf).to(torch::kCUDA).contiguous();
+        tensor_map["tmp_qkv_out1"] = torch::empty({total_seq_len_,768*3},torch::kHalf).to(torch::kCUDA).contiguous();
 
 
     }

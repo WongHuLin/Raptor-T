@@ -1,9 +1,9 @@
-#include "./multi_headed_attention.h"
+// #include "./multi_headed_attention.h"
 #include <torch/torch.h>
 #include "./kernels/mat_mul.h"
 #include "./kernels/kernel.h"
-#include "./bert_output.h"
-#include "./bert_intermediate.h"
+// #include "./bert_output.h"
+// #include "./bert_intermediate.h"
 #include "cuda_fp16.h"
 // #include "./tensor_set.h"
 
@@ -25,6 +25,21 @@ bool check_value(half* A,float *B, int len_a, int len_b){
     for(int i=0;i<len_a;i++){
         if(abs(__half2float(A[i])-B[i])>0.01){
             std::cout<<std::setprecision(2)<<i<<" "<<__half2float(A[i])<<" "<<B[i]<<" "<<abs(A[i]-B[i])<<std::endl;
+            return false;
+        }
+        // return false;
+    }
+    return true;
+}
+
+bool check_value(half* A,half *B, int len_a, int len_b){
+    if(len_a != len_b){
+        return false;
+    }
+    std::cout<<setiosflags(std::ios::fixed);
+    for(int i=0;i<len_a;i++){
+        if(abs(__half2float( A[i])-__half2float(B[i]))>0.1){
+            std::cout<<std::setprecision(2)<<i<<" "<<__half2float(A[i])<<" "<<__half2float(B[i])<<" "<<abs(A[i]-B[i])<<std::endl;
             return false;
         }
         // return false;
@@ -61,15 +76,15 @@ void select_K_and_V(int block_num,std::vector<std::vector<int>> select_array, to
 
 
 void test_sparse_attention(){
-    sparse_transformers::layers::MultiHeadedAttention multi_headed_attention = sparse_transformers::layers::MultiHeadedAttention();
+    // sparse_transformers::layers::MultiHeadedAttention multi_headed_attention = sparse_transformers::layers::MultiHeadedAttention();
     std::vector<int> seq_len_info = {0,64};
-    sparse_transformers::layers::TensorSet t(4096,622,65);
-    auto tensor_set  = sparse_transformers::layers::TensorSet::get_instance();
-    torch::Tensor to_select_index_ = tensor_set->get_tensor("to_select_index_tensor");
-     torch::Tensor to_select_index_position_ = tensor_set->get_tensor("to_select_index_position_tensor");
-    multi_headed_attention.GenerateSparseBlockIndex(to_select_index_,to_select_index_position_,seq_len_info,4096,64,3);
-    std::cout<<to_select_index_<<std::endl;
-    std::cout<<to_select_index_position_<<std::endl;
+    // sparse_transformers::layers::TensorSet t(4096,622,65);
+    // auto tensor_set  = sparse_transformers::layers::TensorSet::get_instance();
+    // torch::Tensor to_select_index_ = tensor_set->get_tensor("to_select_index_tensor");
+    //  torch::Tensor to_select_index_position_ = tensor_set->get_tensor("to_select_index_position_tensor");
+    // multi_headed_attention.GenerateSparseBlockIndex(to_select_index_,to_select_index_position_,seq_len_info,4096,64,3);
+    // std::cout<<to_select_index_<<std::endl;
+    // std::cout<<to_select_index_position_<<std::endl;
     
     std::vector<int> to_select_index_position = {0,64,71,79,87,95,103,111,119,127,135,143,151,159,167,175,183,191,199,207,215,223,231,239,247,255,263,271,279,287,295,303,311,319,327,335,343,351,359,367,375,383,391,399,407,415,423,431,439,447,455,463,471,479,487,495,503,511,519,527,535,543,551,558,622};
 
@@ -162,7 +177,7 @@ void test_sparse_attention(){
     torch::Tensor query = torch::zeros({seq_len,d_num},torch::kFloat32);
     torch::Tensor key =torch::zeros({seq_len,d_num},torch::kFloat32);
     torch::Tensor value =torch::zeros({seq_len,d_num},torch::kFloat32);
-    torch::Tensor out = torch::zeros({seq_len,d_num},torch::kFloat32).to(at::kCUDA).contiguous();
+    torch::Tensor out = torch::zeros({seq_len,d_num},torch::kFloat16).to(at::kCUDA).contiguous();
     torch::Tensor out_1 = torch::zeros({4096,d_num},torch::kFloat32).to(at::kCUDA).contiguous();
 
 
@@ -179,7 +194,7 @@ void test_sparse_attention(){
     // std::cout<<value.reshape({head_num,64,block_size,d_num/head_num}).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,1),"..."})<<std::endl;
 
 
-    sparse_transformers::layers::kernels::test_gemm_1(reinterpret_cast<half*>(query.toType(torch::kFloat16).to(at::kCUDA).contiguous().data_ptr()),reinterpret_cast<half*>(key.toType(torch::kFloat16).to(at::kCUDA).contiguous().data_ptr()),reinterpret_cast<half*>(value.toType(torch::kFloat16).contiguous().to(at::kCUDA).data_ptr()),reinterpret_cast<float*>(out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),block_num,head_num,block_size,head_size);
+    sparse_transformers::layers::kernels::test_gemm_1(reinterpret_cast<half*>(query.toType(torch::kFloat16).to(at::kCUDA).contiguous().data_ptr()),reinterpret_cast<half*>(key.toType(torch::kFloat16).to(at::kCUDA).contiguous().data_ptr()),reinterpret_cast<half*>(value.toType(torch::kFloat16).contiguous().to(at::kCUDA).data_ptr()),reinterpret_cast<half*>(out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),160,block_num,head_num,block_size,head_size);
 
     // sparse_transformers::layers::kernels::test_gemm_(reinterpret_cast<float*>(query.index({torch::indexing::Slice(0,4096),"..."}).reshape({head_num,64,block_size,d_num/head_num}).transpose(-2,-1).contiguous().data_ptr()),reinterpret_cast<float*>(key.index({torch::indexing::Slice(0,4096),"..."}).reshape({head_num,64,block_size,d_num/head_num}).contiguous().data_ptr()),reinterpret_cast<float*>(value.index({torch::indexing::Slice(0,4096),"..."}).contiguous().data_ptr()),reinterpret_cast<float*>(out_1.contiguous().data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),64,12,64,64);
 
@@ -193,18 +208,37 @@ void test_sparse_attention(){
     auto key_1 = key.index({torch::indexing::Slice(0,4096),"..."}).reshape({head_num,64,block_size,d_num/head_num}).index({torch::indexing::Slice(0, 1),torch::indexing::Slice(0, 64),"..."});
     auto value_1 = value.index({torch::indexing::Slice(0,4096),"..."}).reshape({head_num,64,block_size,d_num/head_num}).index({torch::indexing::Slice(0, 1),torch::indexing::Slice(0, 64),"..."});
 
-    auto temp_score = torch::bmm(query_1.reshape({1,64,64}),key_1.reshape({1,64*64,64}).transpose(-2,-1));
+    auto temp_score = torch::bmm(query_1.reshape({1,64,64}),key_1.reshape({1,64*64,64}).transpose(-2,-1)).contiguous();
+
+    // for(int i=0;i<64;i++){
+    //     for(int j=0;j<64;j++){
+    //         std::cout<<reinterpret_cast<float*>(temp_score.data_ptr())[i*4096+j]<<" ";
+    //     }
+    //     std::cout<<std::endl;
+    // }
+    std::tuple<torch::Tensor, torch::Tensor> max_test = torch::max(temp_score,-1);
+    auto max_val = std::get<0>(max_test).unsqueeze(-1);
+    // std::cout<<max_val<<std::endl;
+
     temp_score = temp_score.softmax(-1);
+    // temp_score = torch::exp(temp_score - max_val);
+    
+    // auto sum_value = torch::sum(temp_score,-1);
+    
+
+    // torch::Tensor sum_test = torch::sum(temp_score,-1);
+    // std::cout<<sum_test<<std::endl;
     auto out_2 = torch::bmm(temp_score,value_1.reshape({1,64*64,64}));
 
     // auto temp_score = torch::mm(query_1.index({"...",torch::indexing::Slice(0,32),torch::indexing::Slice(0,64)}).reshape({32,64}),key_1.index({"...",torch::indexing::Slice(0,1),torch::indexing::Slice(0,32),torch::indexing::Slice(0,64)}).reshape({32,64}).transpose(-2,-1));
     // std::cout<<temp_score;
 
     // auto out_2 = torch::mm(temp_score,value_1.index({"...",torch::indexing::Slice(0,1),torch::indexing::Slice(0,32),torch::indexing::Slice(0,64)}).reshape({32,64}));
-    // std::cout<<out_2;
+    std::cout<<out[0][0];
 
 
-    std::cout<<"The first result is "<<check_value(reinterpret_cast<float*>(out.index({torch::indexing::Slice(0,4096),"..."}).reshape({head_num,64,block_size,d_num/head_num}).to(at::kCPU).contiguous().data_ptr()),reinterpret_cast<float*>(out_1.to(at::kCPU).contiguous().data_ptr()),out_1.numel(),out_1.numel())<<std::endl;
+    std::cout<<"The first result is "<<check_value(reinterpret_cast<half*>(out.index({torch::indexing::Slice(0,4096),"..."}).reshape({head_num,64,block_size,d_num/head_num}).to(at::kCPU).contiguous().data_ptr()),reinterpret_cast<half*>(out_1.toType(torch::kFloat16).to(at::kCPU).contiguous().data_ptr()),out_1.numel(),out_1.numel())<<std::endl;
+
 }
 // void test_sparse_attention_1(){
 

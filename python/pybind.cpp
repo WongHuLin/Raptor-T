@@ -78,7 +78,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
         .def("update_meta_data",&layers::MetaData::update_meta_data)
         .def("terminate_thread",&layers::MetaData::terminate_thread);
         
-        
 }
 }
 }

@@ -3,6 +3,7 @@
 #include <cuda.h>
 #include <cublas_v2.h>
 #include "nvToolsExt.h"
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 namespace sparse_transformers {
 namespace layers {

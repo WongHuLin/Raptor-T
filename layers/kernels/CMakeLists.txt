@@ -3,6 +3,7 @@ add_library(kernels OBJECT
     add_bias_act.cu
     add_bias_and_layernorm.cu
     add_bias_and_transpose.cu
+    sparse_attention_new.cu
     sparse_attention.cu
     mat_mul.cpp
     )

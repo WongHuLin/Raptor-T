@@ -57,7 +57,7 @@ class BertEmbeddings():
         embeddings = inputs_embeds + token_type_embeddings + position_embeddings
 
         embeddings = self.LayerNorm(embeddings)
-        return embeddings
+        return embeddings.half().contiguous()
 
     @staticmethod
     def from_torch(bert_embedding: TorchBertEmbeddings) -> 'BertEmbeddings':
@@ -305,6 +305,7 @@ class BertModelNoPooler:
             self,
             inputs: torch.Tensor,
             total_seq_len: int,
+            thread_block_limit: int,
             seq_position_info,
             seq_position_info_tensor,
             partition_part_index_tensor,
@@ -330,8 +331,6 @@ class BertModelNoPooler:
 
         # self.prepare(inputs, attention_masks, token_type_ids, position_ids,
         #              extended_attention_masks)
-
-        thread_block_limit = 80
         
         nvtx.range_push("embeddings")
         hidden_cache = self.embeddings(
@@ -384,6 +383,7 @@ class BertModel:
 
     def __call__(self,
                  inputs: torch.Tensor,
+                 thread_block_limit: int,
                  attention_masks: Optional[torch.Tensor] = None,
                  token_type_ids: Optional[torch.Tensor] = None,
                  position_ids: Optional[torch.Tensor] = None,

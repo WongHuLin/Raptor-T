@@ -9,6 +9,9 @@
 // #include <cub/cub.cuh>
 #define FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
 #define FLOAT(pointer) (reinterpret_cast<float*>(&(pointer)))
+#define HALF(pointer) (reinterpret_cast<half*>(&(pointer)))
+#define HALF2(pointer) (reinterpret_cast<half2*>(&(pointer)))
+
 
 namespace sparse_transformers {
 namespace layers {
@@ -183,6 +186,91 @@ __global__ void add_bias_and_layernorm_1(DataType *out_data, DataType *input_dat
     FLOAT4(out_data[(bidx*handle_row+1)*normalized_len + tid*4]) = data_2;
 
 }
+
+__global__ void add_bias_and_layernorm_half(half *out_data, half *input_data, 
+    half *bias, int seq_len, int handle_row, int normalized_len, float eps, 
+    half *layernorm_weight, half *layernorm_bias){
+    const int tidx = threadIdx.x;
+    const int tidy = threadIdx.y;
+    const int tidx_dim = blockDim.x;
+
+    const int bidx = blockIdx.x;
+
+    typedef cub::WarpReduce<float> WarpReduce;
+    __shared__ typename WarpReduce::TempStorage temp_storage[4];
+
+    float4 data[3];
+    float4 input_data_[3];
+    float4 bias_[3];
+    float4 layer_norm_weight_[3];
+    float4 layer_norm_bias_[3];
+
+
+    for(int i=0;i<3;i++){
+        // 原始数据
+        data[i] = FLOAT4(out_data[bidx*handle_row*normalized_len + tidy*normalized_len + tidx*24 + i*8]);
+        // 加载残差数据
+        input_data_[i] = FLOAT4(input_data[bidx*handle_row*normalized_len + tidy*normalized_len + tidx*24 + i*8]);
+        // bias
+        bias_[i] = FLOAT4(bias[tidx*24 + i*8]);
+        layer_norm_weight_[i] = FLOAT4(layernorm_weight[tidx*24 + i*8]);
+        layer_norm_bias_[i] = FLOAT4(layernorm_bias[tidx*24 + i*8]);
+    }
+
+    half2 mean,var;
+
+    {
+        half2 temp_h2,temp1_h2;
+        float temp_f = 0.0f;
+        float temp1_f = 0.0f;
+
+        for(int i=0;i<4;i++){
+            HALF2(data[0])[i] = __hadd2(__hadd2(HALF2(data[0])[i], HALF2(bias_[0])[i]),HALF2(input_data_[0])[i]);
+            HALF2(data[1])[i] = __hadd2(__hadd2(HALF2(data[1])[i], HALF2(bias_[1])[i]),HALF2(input_data_[1])[i]);
+            HALF2(data[2])[i] = __hadd2(__hadd2(HALF2(data[2])[i], HALF2(bias_[2])[i]),HALF2(input_data_[2])[i]);
+
+            temp_h2 = __hadd2(__hadd2(HALF2(data[0])[i],HALF2(data[1])[i]),HALF2(data[2])[i]);
+            temp1_h2 = __hadd2(__hadd2(__hmul2(HALF2(data[0])[i],HALF2(data[0])[i]), __hmul2(HALF2(data[1])[i],HALF2(data[1])[i])),__hmul2(HALF2(data[2])[i],HALF2(data[2])[i]));
+
+            temp_f += __half2float(__hadd(HALF(temp_f)[0], HALF(temp_f)[1]));
+            temp1_f += __half2float(__hadd(HALF(temp1_h2)[0], HALF(temp1_h2)[1]));
+
+        }
+        // if(bidx == 0 && bidy == 0)
+        //     printf("%f %f \n",sum[0],sum[1]);
+
+        __shared__ float sum_temp_smem[2][4];
+
+        sum_temp_smem[0][tidy] = WarpReduce(temp_storage[tidy]).Sum(temp_f);
+        sum_temp_smem[1][tidy] = WarpReduce(temp_storage[tidy]).Sum(temp1_f);
+
+        __syncthreads();
+        temp_f = sum_temp_smem[0][tidy]/normalized_len;
+        temp1_f = sum_temp_smem[1][tidy]/normalized_len-temp_f*temp_f+eps;
+
+        mean = __half2half2(__float2half(temp_f));
+        var = __half2half2(__float2half(temp1_f));
+
+        // if(bidx == 0 && bidy == 0 && tidx == 0 && tidy ==0 )
+        //     printf("%f %f %f %f\n",mean[0],mean[1],var[0],var[1]);
+        
+    }
+    for(int i=0;i<4;i++){
+
+        HALF2(data[0])[i] = __hadd2(__hmul2(__h2div(__hsub2(HALF2(data[0])[i],mean),var),HALF2(layer_norm_weight_[0])[i]),HALF2(layer_norm_bias_[0])[i]);
+        HALF2(data[1])[i] = __hadd2(__hmul2(__h2div(__hsub2(HALF2(data[1])[i],mean),var),HALF2(layer_norm_weight_[1])[i]),HALF2(layer_norm_bias_[1])[i]);
+        HALF2(data[2])[i] = __hadd2(__hmul2(__h2div(__hsub2(HALF2(data[2])[i],mean),var),HALF2(layer_norm_weight_[2])[i]),HALF2(layer_norm_bias_[2])[i]);
+
+    }
+
+    __syncthreads();
+
+    for(int i=0;i<3;i++){
+        FLOAT4(out_data[bidx*handle_row*normalized_len + tidy*normalized_len + tidx*24 + i*8]) = data[i];
+    }
+
+}
+
 void test_add_bias_and_layernorm(float *out,float *input_data, float *bias,int seq_len, int handle_row, int normalized_len, float eps,float* layernorm_weight,float* layernorm_bias){
     // cudaEvent_t start,stop;
     // cudaEventCreate( &start );
@@ -195,6 +283,22 @@ void test_add_bias_and_layernorm(float *out,float *input_data, float *bias,int s
     // cudaDeviceSynchronize();
     // cudaEventElapsedTime(&elapsedTime, start, stop);
     // printf( "Time to generate:  %f ms\n", elapsedTime );
+
+}
+
+void test_add_bias_and_layernorm(half *out,half *input_data, half *bias,int seq_len, int handle_row, int normalized_len, float eps,half* layernorm_weight,half* layernorm_bias){
+    // cudaEvent_t start,stop;
+    // cudaEventCreate( &start );
+    // cudaEventCreate( &stop ) ;
+    // cudaEventRecord( start, 0 ) ;
+    // normalized_len = 768, handle_row = 4
+    add_bias_and_layernorm_half<<<dim3(seq_len/4),dim3(32,4)>>>(out,input_data,bias,seq_len,handle_row,normalized_len,eps,layernorm_weight,layernorm_bias);
+    // cudaEventRecord(stop,0);
+    // float elapsedTime;
+    // cudaEventSynchronize(stop);
+    // cudaDeviceSynchronize();
+    // cudaEventElapsedTime(&elapsedTime, start, stop);
+    // printf( "test_add_bias_and_layernorm  Time to generate:  %f ms\n", elapsedTime );
 
 }
 }

@@ -38,9 +38,9 @@ def generate_random_padding_mask(max_seqlen, batch_size, device, mode='random'):
 
 model.eval()
 torch.manual_seed(0)
-batch_size = 4
-max_seqlen = 4096
-seqlens = torch.randint(max_seqlen // 2, max_seqlen + 1, (batch_size,), device='cuda')
+batch_size = 1
+max_seqlen = 1024
+seqlens = torch.randint(4096, 4097, (batch_size,), device='cuda')
 attention_mask = torch.arange(max_seqlen, device='cuda')[None, :] < seqlens[:, None]
 input_ids = torch.randint(0, config.vocab_size, (batch_size, max_seqlen), dtype=torch.long, device='cuda')
 # key_padding_mask = generate_random_padding_mask(seqlens, batch_size, device, mode='random')

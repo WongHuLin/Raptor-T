@@ -57,16 +57,39 @@ namespace kernels {
                 printf("CUDA runtime error\n");
                 exit(0);
             }
-            nvtxRangePushA("cublasGemmEx");
-            if(cublasGemmEx(headle_, transB, transA, N, M, K_a, &alpha,
-            reinterpret_cast<float*>(B.data_ptr()), CUDA_R_32F, ldb, reinterpret_cast<float*>(A.data_ptr()), CUDA_R_32F, lda,&beta, reinterpret_cast<float*>(out.data_ptr()), CUDA_R_32F, ldc, CUDA_R_32F, cublas_algo) != CUBLAS_STATUS_SUCCESS){
-                std::cout<<A.sizes()<<std::endl;
-                std::cout<<B.sizes()<<std::endl;
-                std::cout<<out.sizes()<<std::endl;
-                printf("CUDA runtime error\n");
-                exit(0);
+            if(A.dtype() == torch::kFloat){
+                nvtxRangePushA("cublasGemmEx");
+                if(cublasGemmEx(headle_, transB, transA, N, M, K_a, &alpha,
+                reinterpret_cast<float*>(B.data_ptr()), CUDA_R_32F, ldb, reinterpret_cast<float*>(A.data_ptr()), CUDA_R_32F, lda,&beta, reinterpret_cast<float*>(out.data_ptr()), CUDA_R_32F, ldc, CUDA_R_32F, cublas_algo) != CUBLAS_STATUS_SUCCESS){
+                    std::cout<<A.sizes()<<std::endl;
+                    std::cout<<B.sizes()<<std::endl;
+                    std::cout<<out.sizes()<<std::endl;
+                    std::cout<<A.dtype()<<std::endl;
+                    std::cout<<B.dtype()<<std::endl;
+                    std::cout<<out.dtype()<<std::endl;
+                    printf("CUDA runtime error\n");
+                    exit(0);
+                }
+                nvtxRangePop();
             }
-            nvtxRangePop();
+            else if(A.dtype() == torch::kHalf){
+                nvtxRangePushA("cublasGemmEx");
+                half alpha_h = __float2half(alpha);
+                half beta_h = __float2half(beta);
+
+                if(cublasGemmEx(headle_, transB, transA, N, M, K_a, &alpha_h,reinterpret_cast<half*>(B.data_ptr()), CUDA_R_16F, ldb, reinterpret_cast<half*>(A.data_ptr()), CUDA_R_16F, lda,&beta_h, reinterpret_cast<half*>(out.data_ptr()), CUDA_R_16F, ldc, CUBLAS_COMPUTE_16F, cublas_algo) != CUBLAS_STATUS_SUCCESS){
+                    std::cout<<name<<std::endl;
+                    std::cout<<A.sizes()<<std::endl;
+                    std::cout<<B.sizes()<<std::endl;
+                    std::cout<<out.sizes()<<std::endl;
+                    std::cout<<A.dtype()<<std::endl;
+                    std::cout<<B.dtype()<<std::endl;
+                    std::cout<<out.dtype()<<std::endl;
+                    printf("CUDA runtime error\n");
+                    exit(0);
+                }
+                nvtxRangePop();
+            }
 
             if(cublasSetMathMode(headle_, CUBLAS_DEFAULT_MATH) != CUBLAS_STATUS_SUCCESS){
                 printf("CUDA runtime error\n");

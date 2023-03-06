@@ -46,6 +46,7 @@ def generate_parition_plan(block_num_array:list,seq_start_index:list,thread_bloc
                 partition_part[pop_element[1]].append(index[i] - start_index[0] +j*start_index[1]+start_index[0]*head_num)
                 pop_element = (pop_element[0]+sorted_value[i],pop_element[1])
                 heapq.heappush(min_heap,pop_element)
+        print(min_heap)
         partition_part_index = [len(it) for it in partition_part]
         partition_part_index = [sum(partition_part_index[0:i]) for i in range(0,len(partition_part_index)+1)]
         partition_part_index_tensor = torch.tensor(partition_part_index,dtype=torch.int,device="cuda")
@@ -212,34 +213,35 @@ if __name__ == '__main__':
     #         # print("release comp_end_event {}".format(comp_cnt))
     #         comp_end_event[p_id].record()
 
-    model_name = 'big_bird'
+    model_name = 'sparse_attn'
     if model_name == 'sparse_attn':
-        model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device)
+        model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device).half()
         bertModel = BertModelNoPooler.from_torch(model)
         metadata = cxx.MetaData()
+        thread_block_limit = 240
         input_data = generate_input_data(10,1024,4096,block_size)
         position_ids = [np.arange(len(it)).tolist() for it in input_data]
         position_ids = reduce(operator.add, position_ids)
-        seq_position_info,seq_position_info_tensor,total_comp_block_num,partition_part_index_tensor,partition_part_tensor = generate_data_metainfo(input_data,64,160)
+        seq_position_info,seq_position_info_tensor,total_comp_block_num,partition_part_index_tensor,partition_part_tensor = generate_data_metainfo(input_data,64,thread_block_limit)
         total_seq_len = seq_position_info[-1]*block_size
         input_data = reduce(operator.add, input_data)
         hidden_states = torch.tensor(input_data,dtype=torch.int,device = device)
         token_type_ids = torch.zeros_like(hidden_states)
         position_ids = torch.tensor(position_ids,dtype=torch.int,device = device)
         attention_masks = torch.zeros_like(hidden_states)
-        output_layer_temp = torch.zeros(total_seq_len,768,dtype=float,device=device)
-        intermediate_temp = torch.zeros(total_seq_len,3072,dtype=float,device=device)
-        attention_output = torch.zeros(total_seq_len,768,dtype=float,device=device)
+        output_layer_temp = torch.zeros(total_seq_len,768,dtype=torch.half,device=device)
+        intermediate_temp = torch.zeros(total_seq_len,3072,dtype=torch.half,device=device)
+        attention_output = torch.zeros(total_seq_len,768,dtype=torch.half,device=device)
 
         for i in range(3):
             metadata.update_meta_data(total_seq_len,seq_position_info[-1]+1,total_comp_block_num,seq_position_info)
-            output = bertModel(hidden_states, total_seq_len, seq_position_info, seq_position_info_tensor,  partition_part_index_tensor,  partition_part_tensor, attention_masks, token_type_ids, position_ids,output_layer_temp,intermediate_temp,attention_output)
+            output = bertModel(hidden_states, total_seq_len,thread_block_limit, seq_position_info, seq_position_info_tensor,  partition_part_index_tensor,  partition_part_tensor, attention_masks, token_type_ids, position_ids,output_layer_temp,intermediate_temp,attention_output)
 
         for i in range(20):
             # print(i)
             metadata.update_meta_data(total_seq_len,seq_position_info[-1]+1,total_comp_block_num,seq_position_info)
             torch.cuda.nvtx.range_push("Bert")
-            output = bertModel(hidden_states, total_seq_len, seq_position_info, seq_position_info_tensor,  partition_part_index_tensor,  partition_part_tensor, attention_masks, token_type_ids, position_ids,output_layer_temp,intermediate_temp,attention_output)
+            output = bertModel(hidden_states, total_seq_len,thread_block_limit, seq_position_info, seq_position_info_tensor,  partition_part_index_tensor,  partition_part_tensor, attention_masks, token_type_ids, position_ids,output_layer_temp,intermediate_temp,attention_output)
             torch.cuda.nvtx.range_pop()
 
         metadata.terminate_thread()
