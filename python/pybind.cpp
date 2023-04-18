@@ -2,7 +2,6 @@
 #include "../layers/bert_attention.h"
 #include "../layers/bert_intermediate.h"
 #include "../layers/bert_output.h"
-#include "../layers/bert_pooler.h"
 #include "../layers/metadata.h"
 
 
@@ -56,13 +55,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
         }))
         .def("__call__", &layers::BertOutput::operator());
 
-    pybind11::class_<layers::BertPooler>(m,"BertPooler")
-        .def(pybind11::init([](torch::Tensor &dense_weight, 
-        torch::Tensor &dense_bias) -> layers::BertPooler * {
-                    return new layers::BertPooler(
-                        std::move(dense_weight), std::move(dense_bias));
-        }))
-        .def("__call__", &layers::BertPooler::operator());
+    // pybind11::class_<layers::BertPooler>(m,"BertPooler")
+    //     .def(pybind11::init([](torch::Tensor &dense_weight, 
+    //     torch::Tensor &dense_bias) -> layers::BertPooler * {
+    //                 return new layers::BertPooler(
+    //                     std::move(dense_weight), std::move(dense_bias));
+    //     }))
+    //     .def("__call__", &layers::BertPooler::operator());
 
     pybind11::class_<layers::TensorSet>(m,"TensorSet")
         .def(pybind11::init([](int64_t total_seq_len, int64_t to_select_index_len, int64_t to_select_index_position_len) -> layers::TensorSet * {
