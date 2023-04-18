@@ -194,7 +194,7 @@ void test_sparse_attention(){
     // std::cout<<value.reshape({head_num,64,block_size,d_num/head_num}).index({torch::indexing::Slice(0,1),torch::indexing::Slice(0,1),"..."})<<std::endl;
 
 
-    sparse_transformers::layers::kernels::test_gemm_1(reinterpret_cast<half*>(query.toType(torch::kFloat16).to(at::kCUDA).contiguous().data_ptr()),reinterpret_cast<half*>(key.toType(torch::kFloat16).to(at::kCUDA).contiguous().data_ptr()),reinterpret_cast<half*>(value.toType(torch::kFloat16).contiguous().to(at::kCUDA).data_ptr()),reinterpret_cast<half*>(out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),160,block_num,head_num,block_size,head_size);
+    sparse_transformers::layers::kernels::test_gemm_1(reinterpret_cast<half*>(query.toType(torch::kFloat16).to(at::kCUDA).contiguous().data_ptr()),reinterpret_cast<half*>(key.toType(torch::kFloat16).to(at::kCUDA).contiguous().data_ptr()),reinterpret_cast<half*>(value.toType(torch::kFloat16).contiguous().to(at::kCUDA).data_ptr()),reinterpret_cast<half*>(out.data_ptr()),1,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),160,block_num,head_num,block_size,head_size);
 
     // sparse_transformers::layers::kernels::test_gemm_(reinterpret_cast<float*>(query.index({torch::indexing::Slice(0,4096),"..."}).reshape({head_num,64,block_size,d_num/head_num}).transpose(-2,-1).contiguous().data_ptr()),reinterpret_cast<float*>(key.index({torch::indexing::Slice(0,4096),"..."}).reshape({head_num,64,block_size,d_num/head_num}).contiguous().data_ptr()),reinterpret_cast<float*>(value.index({torch::indexing::Slice(0,4096),"..."}).contiguous().data_ptr()),reinterpret_cast<float*>(out_1.contiguous().data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),64,12,64,64);
 
@@ -525,6 +525,140 @@ void test_sparse_attention(){
 //     std::cout<<"The result is "<<check_value<float>(reinterpret_cast<float*>(out.to(at::kCPU).data_ptr()),reinterpret_cast<float*>(out_data.to(at::kCPU).data_ptr()),out_data.numel(),out_data.numel())<<std::endl;
 
 // }
+
+
+#include <chrono>   
+using namespace std;
+using namespace chrono;
+
+void test_add_bias_act(){
+    int seq_len = 4096;
+    int d_num = 3072;
+    torch::Tensor input = torch::zeros({seq_len,d_num},torch::kFloat32);
+    torch::Tensor bias = torch::zeros({d_num},torch::kFloat32);
+    torch::Tensor out1 = torch::zeros({seq_len,d_num},torch::kFloat32);
+    torch::Tensor out2 = torch::zeros({seq_len,d_num},torch::kFloat32);
+
+
+    generate_array<float>(reinterpret_cast<float*>(input.data_ptr()),seq_len*d_num);
+    generate_array<float>(reinterpret_cast<float*>(bias.data_ptr()),d_num);
+    input = input.to(torch::kCUDA);
+    bias = bias.to(torch::kCUDA);
+    out1 = out1.to(torch::kCUDA);
+    out2 = out2.to(torch::kCUDA);
+
+    auto gule = torch::nn::GELU();
+
+    for(int i=0;i<3;i++){
+        out1 = input + bias;
+        out1 = gule(out1);
+    }
+    for(int i=0;i<10;i++){
+        out1 = input + bias;
+        out1 = gule(out1);
+    }
+
+    for(int i=0;i<3;i++){
+        sparse_transformers::layers::kernels::test_add_bias_act(reinterpret_cast<float*>(bias.data_ptr()),reinterpret_cast<float*>(input.data_ptr()),seq_len,d_num);
+    }
+    for(int i=0;i<10;i++){
+        sparse_transformers::layers::kernels::test_add_bias_act(reinterpret_cast<float*>(bias.data_ptr()),reinterpret_cast<float*>(input.data_ptr()),seq_len,d_num);
+    }
+}
+
+void test_add_bias_and_transpose(){
+    int seq_len = 4096;
+    int d_num = 2304;
+    torch::Tensor input = torch::zeros({seq_len,d_num},torch::kFloat32);
+    torch::Tensor bias = torch::zeros({d_num},torch::kFloat32);
+    torch::Tensor out1 = torch::zeros({seq_len,d_num},torch::kFloat32);
+    torch::Tensor q = torch::zeros({seq_len,d_num/3},torch::kFloat16);
+    torch::Tensor k = torch::zeros({seq_len,d_num/3},torch::kFloat16);
+    torch::Tensor v = torch::zeros({seq_len,d_num/3},torch::kFloat16);
+
+
+
+    generate_array<float>(reinterpret_cast<float*>(input.data_ptr()),seq_len*d_num);
+    generate_array<float>(reinterpret_cast<float*>(bias.data_ptr()),d_num);
+    input = input.to(torch::kCUDA).toType(torch::kFloat16);
+    bias = bias.to(torch::kCUDA).toType(torch::kFloat16);
+    out1 = out1.to(torch::kCUDA).toType(torch::kFloat16);
+    q = q.to(torch::kCUDA).toType(torch::kFloat16);
+    v = v.to(torch::kCUDA).toType(torch::kFloat16);
+    k = k.to(torch::kCUDA).toType(torch::kFloat16);
+    
+
+    auto gule = torch::nn::GELU();
+    for(int i=0;i<3;i++){
+        out1 = input + bias;
+        out1 = out1.reshape({64,64,3,12,64}).permute({2,3,0,1,4}).contiguous();
+    }
+    for(int i=0;i<10;i++){
+        out1 = input + bias;
+        out1 = out1.reshape({64,64,3,12,64}).permute({2,3,0,1,4}).contiguous();
+    }
+
+    // sparse_transformers::layers::
+
+
+    std::vector<int> seq_len_info = {0,64};
+    auto seq_len_info_tensor =  torch::from_blob(seq_len_info.data(),{3},torch::kInt32).to(torch::kCUDA);
+    for(int i=0;i<3;i++){
+        sparse_transformers::layers::kernels::test_add_bias_and_transpose(reinterpret_cast<half*>(bias.data_ptr()),reinterpret_cast<half*>(input.data_ptr()),reinterpret_cast<half*>(q.data_ptr()),reinterpret_cast<half*>(k.data_ptr()),reinterpret_cast<half*>(v.data_ptr()),0,768,768*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),1,12,64,64,64);
+    }
+    for(int i=0;i<10;i++){
+        sparse_transformers::layers::kernels::test_add_bias_and_transpose(reinterpret_cast<half*>(bias.data_ptr()),reinterpret_cast<half*>(input.data_ptr()),reinterpret_cast<half*>(q.data_ptr()),reinterpret_cast<half*>(k.data_ptr()),reinterpret_cast<half*>(v.data_ptr()),0,768,768*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),1,12,64,64,64);
+    }
+
+}
+
+void test_add_bias_and_layernorm(){
+    int seq_len = 4096;
+    int d_num = 768;
+    torch::Tensor input = torch::zeros({seq_len,d_num},torch::kFloat32);
+    torch::Tensor bias = torch::zeros({d_num},torch::kFloat32);
+    torch::Tensor res_bias = torch::zeros({seq_len,d_num},torch::kFloat32);
+    torch::Tensor out1 = torch::zeros({seq_len,d_num},torch::kFloat32);
+    torch::Tensor out2 = torch::zeros({seq_len,d_num},torch::kFloat32);
+    torch::Tensor layer_norm_weight_ = torch::ones({d_num});
+    torch::Tensor layer_norm_bias_ = torch::zeros({d_num});
+
+
+    generate_array<float>(reinterpret_cast<float*>(input.data_ptr()),seq_len*d_num);
+    generate_array<float>(reinterpret_cast<float*>(bias.data_ptr()),d_num);
+    generate_array<float>(reinterpret_cast<float*>(res_bias.data_ptr()),seq_len*d_num);
+
+    input = input.to(torch::kCUDA).toType(torch::kFloat16);
+    bias = bias.to(torch::kCUDA).toType(torch::kFloat16);
+    res_bias = res_bias.to(torch::kCUDA).toType(torch::kFloat16);
+    out1 = out1.to(torch::kCUDA).toType(torch::kFloat16);
+    out2 = out2.to(torch::kCUDA).toType(torch::kFloat16);
+    layer_norm_weight_ = layer_norm_weight_.to(torch::kCUDA).toType(torch::kFloat16);
+    layer_norm_bias_ = layer_norm_bias_.to(torch::kCUDA).toType(torch::kFloat16);
+
+
+
+    torch::nn::LayerNorm layer_norm(torch::nn::LayerNormOptions({768}).elementwise_affine(false).eps(1e-5));
+    for(int i=0;i<3;i++){
+        out1 = input + bias + res_bias;
+        out1 = layer_norm(out1);
+    }
+    for(int i=0;i<10;i++){
+        out1 = input + bias + res_bias;
+        out1 = layer_norm(out1);
+    }
+
+    std::vector<int> seq_len_info = {0,64};
+    auto seq_len_info_tensor =  torch::from_blob(seq_len_info.data(),{3},torch::kInt32).to(torch::kCUDA);
+    for(int i=0;i<3;i++){
+        sparse_transformers::layers::kernels::test_add_bias_and_layernorm(reinterpret_cast<half*>(input.data_ptr()),reinterpret_cast<half*>(res_bias.data_ptr()),reinterpret_cast<half*>(bias.data_ptr()),seq_len,2,768,float(1e-5),reinterpret_cast<half*>(layer_norm_weight_.data_ptr()),reinterpret_cast<half*>(layer_norm_bias_.data_ptr()));
+    }
+    for(int i=0;i<10;i++){
+        sparse_transformers::layers::kernels::test_add_bias_and_layernorm(reinterpret_cast<half*>(input.data_ptr()),reinterpret_cast<half*>(res_bias.data_ptr()),reinterpret_cast<half*>(bias.data_ptr()),seq_len,2,768,float(1e-5),reinterpret_cast<half*>(layer_norm_weight_.data_ptr()),reinterpret_cast<half*>(layer_norm_bias_.data_ptr()));
+
+    }
+
+}
 
 int main(){
     test_sparse_attention();

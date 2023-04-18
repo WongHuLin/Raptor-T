@@ -25,7 +25,7 @@ class BertAttention : public MultiHeadedAttention {
   BertAttention(torch::Tensor qkv_weight, torch::Tensor qkv_bias,
                 torch::Tensor dense_weight, torch::Tensor dense_bias,
                 torch::Tensor layer_norm_weight, torch::Tensor layer_norm_bias,
-                int64_t num_attention_heads, int layer_idx)
+                int64_t num_attention_heads, int layer_idx, bool async = true)
       : MultiHeadedAttention(
             std::move(torch::empty(0)), std::move(torch::empty(0)),
             std::move(torch::empty(0)), std::move(torch::empty(0)),
@@ -33,17 +33,17 @@ class BertAttention : public MultiHeadedAttention {
             std::move(dense_weight), std::move(dense_bias),
             std::move(qkv_weight), std::move(qkv_bias),
             std::move(layer_norm_weight),  //(768)
-            std::move(layer_norm_bias), num_attention_heads, layer_idx) {
+            std::move(layer_norm_bias), num_attention_heads, layer_idx, async) {
     head_num_ = 12;
     d_num_ = 768;
     block_size_ = 64;
     head_size_ = d_num_/head_num_;
   }
 
-  void operator()(const torch::Tensor &input_tensor,
+  std::map<std::string,float> operator()(const torch::Tensor &input_tensor,
         const torch::Tensor &attention_mask, torch::Tensor &output, 
         const std::vector<int> seq_position_info,torch::Tensor &seq_len_info_tensor, const torch::Tensor &partition_part_index_tensor,
-        const torch::Tensor &partition_part_tensor, const int block_limit )const;
+        const torch::Tensor &partition_part_tensor, const int block_limit,std::map<std::string,float> &info, bool kernel_fusion = true,bool balanced = true)const;
 
     mutable int64_t head_num_;
     mutable int64_t d_num_;

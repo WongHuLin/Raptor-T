@@ -110,6 +110,27 @@ void test_add_bias_act(float *bias, float* out, int total_seq_len, int dim_size)
     add_bias_act<ActivationType::Gelu><<<dim3(total_seq_len),dim3(block_num)>>>(bias,out,dim_size);
 }
 
+void add_bias_act_kernel(const torch::Tensor &bias, torch::Tensor& out, int total_seq_len, int dim_size,torch::nn::GELU gelu,std::map<std::string,float>& info, bool kernel_fusion){
+    
+    auto start_time = std::chrono::system_clock::now();
+
+    if(kernel_fusion)
+    {
+        const int block_num = dim_size / 8;
+        add_bias_act_half<ActivationType::Gelu><<<dim3(total_seq_len),dim3(block_num)>>>(reinterpret_cast<half*>(bias.data_ptr()),reinterpret_cast<half*>(out.data_ptr()),dim_size);
+    }
+    else{
+        out += bias;
+        out = gelu(out);
+    }
+    
+    auto end_time = std::chrono::system_clock::now();
+    if(info.find("add_bias_act_kernel") != info.end())
+    {    auto dura = (std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time)).count();
+        info["add_bias_act_kernel"] += dura;
+    }
+}
+
 void test_add_bias_act(half *bias, half* out, int total_seq_len, int dim_size){
     const int block_num = dim_size / 8;
     // cudaEvent_t start,stop;

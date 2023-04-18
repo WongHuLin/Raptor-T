@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import lltm_cpp as cxx
+import raptor_t as cxx
 import torch.cuda.nvtx as nvtx
 import operator
 import enum
@@ -72,12 +72,14 @@ class BertIntermediate(cxx.BertIntermediate):
     def __call__(self,
                  input_tensor: torch.Tensor,
                  total_seq_len: int,
-                 output: Optional[torch.Tensor] = None) -> torch.Tensor:
+                 output: Optional[torch.Tensor] = None,
+                 kernel_fusion = True,
+                 test_info = None,) -> torch.Tensor:
         nvtx.range_push("intermediate")
         output = create_empty_if_none(output,(total_seq_len,3072),torch.device('cuda'))
-        super(BertIntermediate,self).__call__(input_tensor, output)
+        test_info = super(BertIntermediate,self).__call__(input_tensor, output,test_info,kernel_fusion)
         nvtx.range_pop()
-        return output
+        return test_info
 
     @staticmethod
     def from_torch(intermediate: TorchBertIntermediate):
@@ -93,12 +95,14 @@ class BertOutput(cxx.BertOutput):
                  intermediate_output: torch.Tensor,
                  attention_output: torch.Tensor,
                  total_seq_len: int,
-                 output: Optional[torch.Tensor] = None) -> torch.Tensor:
+                 output: Optional[torch.Tensor] = None,
+                 kernel_fusion = True,
+                 test_info = None,) -> torch.Tensor:
         nvtx.range_push("output")
         output = create_empty_if_none(output,(total_seq_len,768),torch.device('cuda'))
-        super(BertOutput, self).__call__(intermediate_output,attention_output,output)
+        test_info = super(BertOutput, self).__call__(intermediate_output,attention_output,output,test_info,kernel_fusion)
         nvtx.range_pop()
-        return output
+        return test_info
 
     @staticmethod
     def from_torch(output: TorchBertOutput):
@@ -121,14 +125,17 @@ class BertAttention(cxx.BertAttention):
                  attention_mask: Optional[torch.Tensor] = torch.empty(0),
                  head_mask: Optional[torch.Tensor] = torch.empty(0),
                  output_attentions: Optional[bool] = False,
-                 is_trans_weight: Optional[bool] = False) -> torch.Tensor:
+                 is_trans_weight: Optional[bool] = False,
+                 kernel_fusion = True,
+                 test_info = None,
+                 balanced = True) -> torch.Tensor:
         nvtx.range_push("attention")
-        super(BertAttention,self).__call__(input_tensor,attention_mask,context_layer,seq_position_info,seq_position_info_tensor,partition_part_index_tensor,partition_part_tensor,block_limit)
+        test_info = super(BertAttention,self).__call__(input_tensor,attention_mask,context_layer,seq_position_info,seq_position_info_tensor,partition_part_index_tensor,partition_part_tensor,block_limit,test_info,kernel_fusion,balanced)
         nvtx.range_pop()
-        return context_layer
+        return test_info
 
     @staticmethod
-    def from_torch(attention: TorchBertAttention,layer_idx:int):
+    def from_torch(attention: TorchBertAttention,layer_idx:int,async_:bool):
         params = {k: v for k, v in attention.named_parameters()}
         with torch.no_grad():
             # merge self.query.weight, self.query.weight and self.query.weight together as qkv.weight
@@ -151,7 +158,7 @@ class BertAttention(cxx.BertAttention):
                 params['output.LayerNorm.weight'],
                 params['output.LayerNorm.bias'],
                 attention.self.num_attention_heads,
-                layer_idx)
+                layer_idx,async_)
 
             return att
 
@@ -174,9 +181,12 @@ class BertLayer:
                  block_limit:int,
                  attention_mask: Optional[torch.Tensor] = torch.empty(0),
                  head_mask: Optional[torch.Tensor] = torch.empty(0),
-                 output_attentions=False):
+                 output_attentions=False,
+                 kernel_fusion = True,
+                 test_info = None,
+                 balanced = True):
         nvtx.range_push("layer")
-        self.attention(
+        test_info = self.attention(
             hidden_states,
             seq_position_info,
             seq_position_info_tensor,
@@ -187,17 +197,21 @@ class BertLayer:
             attention_mask,
             head_mask,
             output_attentions=output_attentions,
+            test_info = test_info,
+            kernel_fusion = kernel_fusion,
+            balanced = balanced,
             )
-        self.intermediate(attention_output,seq_position_info[-1]*64,intermediate_temp)
-        self.output(intermediate_temp,
+        test_info = self.intermediate(attention_output,seq_position_info[-1]*64,intermediate_temp,test_info = test_info,kernel_fusion = kernel_fusion,)
+        test_info = self.output(intermediate_temp,
                                 attention_output,
-                                seq_position_info[-1]*64,hidden_states)
+                                seq_position_info[-1]*64,hidden_states,test_info = test_info,kernel_fusion = kernel_fusion,)
         nvtx.range_pop()
-        return hidden_states
+
+        return hidden_states,test_info
 
     @staticmethod
-    def from_torch(layer: TorchBertLayer,layer_idx:int):
-        return BertLayer(BertAttention.from_torch(layer.attention, layer_idx),
+    def from_torch(layer: TorchBertLayer,layer_idx:int,async_:bool):
+        return BertLayer(BertAttention.from_torch(layer.attention, layer_idx,async_),
                          BertIntermediate.from_torch(layer.intermediate),
                          BertOutput.from_torch(layer.output))
 
@@ -217,6 +231,9 @@ class BertEncoder:
                  output_layer_temp,
                  intermediate_temp,
                  attention_output,
+                 test_info = None,
+                 kernel_fusion = True,
+                 balanced = True,
                  attention_mask: Optional[torch.Tensor] = torch.empty(0),
                  head_mask: Optional[torch.Tensor] = torch.empty(0),
                  output_attentions: Optional[bool] = False,
@@ -225,7 +242,7 @@ class BertEncoder:
         #     tensor_set = cxx.TensorSet.get_instance()
         #     tensor_set.update_tensor_set(4096,622,65)
         for l in self.layer:
-            layer_outputs = l(hidden_states=hidden_states,
+            layer_outputs,test_info = l(hidden_states=hidden_states,
                               block_limit=thread_block_limit,
                               seq_position_info=seq_position_info,
                               seq_position_info_tensor=seq_position_info_tensor,
@@ -235,16 +252,19 @@ class BertEncoder:
                               intermediate_temp = intermediate_temp,
                               attention_output = attention_output,
                               attention_mask=attention_mask,
-                              output_attentions=output_attentions)
+                              test_info = test_info,
+                              kernel_fusion = kernel_fusion,
+                              output_attentions=output_attentions,
+                              balanced = balanced)
             hidden_states = layer_outputs
         
-        return hidden_states
+        return hidden_states,test_info
         # return outputs
 
     @staticmethod
-    def from_torch(encoder: TorchBertEncoder):
+    def from_torch(encoder: TorchBertEncoder,async_:bool):
         layer = [
-            BertLayer.from_torch(bert_layer,layer_idx) for layer_idx,bert_layer in enumerate(encoder.layer)
+            BertLayer.from_torch(bert_layer,layer_idx, async_) for layer_idx,bert_layer in enumerate(encoder.layer)
         ]
         return BertEncoder(layer)
     
@@ -316,6 +336,9 @@ class BertModelNoPooler:
             output_layer_temp:Optional[torch.Tensor] = None,
             intermediate_temp:Optional[torch.Tensor] = None,
             attention_output:Optional[torch.Tensor] = None,
+            test_info = {},
+            kernel_fusion = True,
+            balanced = True,
             head_mask: Optional[torch.Tensor] = None,
             inputs_embeds: Optional[torch.Tensor] = None,
             output_attentions: Optional[bool] = None,
@@ -341,7 +364,7 @@ class BertModelNoPooler:
         
         
         nvtx.range_push("encoder")
-        encoder_outputs = self.encoder(
+        encoder_outputs,test_info = self.encoder(
             hidden_states=hidden_cache,
             total_seq_len=total_seq_len,
             thread_block_limit=thread_block_limit,
@@ -352,18 +375,22 @@ class BertModelNoPooler:
             output_layer_temp = output_layer_temp,
             intermediate_temp = intermediate_temp,
             attention_output = attention_output,
+            test_info = test_info,
+            kernel_fusion=kernel_fusion,
+            balanced = balanced
             )
         nvtx.range_pop()
-        return encoder_outputs
+        return encoder_outputs,test_info
 
     @staticmethod
     def from_torch(model: TorchBertModel,
+                   async_: bool = True,
                    device: Optional[torch.device] = None):
         if device is not None and 'cuda' in device.type and torch.cuda.is_available(
         ):
             model.to(device)
         embeddings = BertEmbeddings.from_torch(model.embeddings)
-        encoder = BertEncoder.from_torch(model.encoder)
+        encoder = BertEncoder.from_torch(model.encoder,async_)
         return BertModelNoPooler(embeddings, encoder)
 
 class BertModel:

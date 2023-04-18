@@ -13,19 +13,21 @@ class BertIntermediate {
       : dense_weight_(std::move(dense_weight)),
         dense_bias_(std::move(dense_bias)) {
             cublasCreate(&handle_);
+            gelu = torch::nn::GELU();
   }
 
   ~BertIntermediate(){
     cublasDestroy(handle_);
   }
 
-  void operator()(const torch::Tensor& input_tensor, torch::Tensor& output) const;
+  std::map<std::string,float> operator()(const torch::Tensor& input_tensor, torch::Tensor& output,std::map<std::string,float> &info, bool kernel_fusion = true) const;
 
  private:
   torch::Tensor dense_weight_;
   torch::Tensor dense_bias_;
 
   cublasHandle_t handle_;
+  torch::nn::GELU gelu = nullptr;
 
 };
 

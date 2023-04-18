@@ -7,6 +7,7 @@
 #include <cooperative_groups/memcpy_async.h>
 #include <thrust/extrema.h>
 #include <cuda_fp16.h>
+#include <math.h>
 // #include <cub/cub.cuh>
 #define FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
 #define FLOAT(pointer) (reinterpret_cast<float*>(&(pointer)))
@@ -22,7 +23,7 @@ template <class DataType>
 __global__ void add_bias_and_transpose(DataType *input_data, DataType *bias, 
     half *q, half *k, half *v, int q_offset, int k_offset, 
     int v_offset,int *seq_len_info,int batch_size, int head_num, int block_size, 
-    int head_size, int block_num){
+    int head_size, int block_num,DataType scaled_factor){
     // For K and V: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * block_size * head_size
     // For Q: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * head_size* block_size
     const int tidy = threadIdx.y;
@@ -100,7 +101,6 @@ __global__ void add_bias_and_transpose(DataType *input_data, DataType *bias,
                 q[write_index+i] = __float2half(smem_q[smem_index]);
             }
 
-
             __syncthreads();
             // if(bidx == 0 && bidy == 0  && block_col == 0){
             //     printf("%d %d %d %d %d %d %f\n",tidx,tidy,block_row,block_col,write_seq_data_start,write_seq_data_start + (tidy*4+1+block_col)*head_size + tidx + block_row,smem_q[tidx][(tidy*4+1)]);
@@ -118,7 +118,7 @@ __global__ void add_bias_and_transpose(DataType *input_data, DataType *bias,
 __global__ void add_bias_and_transpose(half *input_data, half *bias, 
     half *q, half *k, half *v, int q_offset, int k_offset, 
     int v_offset,int *seq_len_info,int batch_size, int head_num, int block_size, 
-    int head_size, int block_num){
+    int head_size, int block_num, half scaled_factor){
     // For K and V: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * block_size * head_size
     // For Q: batch_size * seq_len * all_head_size -> batch_size * head_num * block_num * head_size* block_size
     const int tidy = threadIdx.y;
@@ -130,6 +130,7 @@ __global__ void add_bias_and_transpose(half *input_data, half *bias,
 
     int read_seq_data_start = 0;
     int write_seq_data_start = 0;
+    half2 scaled_factor2 = __half2half2(scaled_factor);
 
     for(int i=1;i<batch_size+1;i++)
         if(bidy >= seq_len_info[i])
@@ -179,7 +180,7 @@ __global__ void add_bias_and_transpose(half *input_data, half *bias,
             half2 q_temp =  HALF2(smem_q[(tidy*4+i)*64])[tidx];
             half2 k_temp =  HALF2(smem_k[(tidy*4+i)*64])[tidx];
             half2 v_temp =  HALF2(smem_v[(tidy*4+i)*64])[tidx];
-            HALF2(smem_q[(tidy*4+i)*64])[tidx] = __hadd2(q_bias_re,q_temp);
+            HALF2(smem_q[(tidy*4+i)*64])[tidx] = __hmul2(__hadd2(q_bias_re,q_temp),scaled_factor2);
             HALF2(smem_k[(tidy*4+i)*64])[tidx] = __hadd2(k_bias_re,k_temp);
             HALF2(smem_v[(tidy*4+i)*64])[tidx] = __hadd2(v_bias_re,v_temp);
         }
@@ -199,7 +200,7 @@ void test_add_bias_and_transpose(float *bias,float *input_data,half *q, half *k,
 //     cudaEventCreate( &start );
 //     cudaEventCreate( &stop ) ;
 //     cudaEventRecord( start, 0 ) ;
-    add_bias_and_transpose<float><<<dim3(head_num,block_num),dim3(32,8)>>>(input_data,bias,q,k,v,q_offset,k_offset,v_offset,seq_len_info,batch_size,head_num,block_size,head_size,block_num);
+    add_bias_and_transpose<float><<<dim3(head_num,block_num),dim3(32,8)>>>(input_data,bias,q,k,v,q_offset,k_offset,v_offset,seq_len_info,batch_size,head_num,block_size,head_size,block_num,1.0);
 //     cudaEventRecord(stop,0);
 //     float elapsedTime;
 //     cudaEventSynchronize(stop);
@@ -208,12 +209,35 @@ void test_add_bias_and_transpose(float *bias,float *input_data,half *q, half *k,
 //     printf( "Time to generate:  %f ms\n", elapsedTime );
 }
 
+void add_bias_and_transpose_kernel(const torch::Tensor&bias, torch::Tensor &input_data, torch::Tensor &q, torch::Tensor &k, torch::Tensor &v,int q_offset, int k_offset, int v_offset,int *seq_len_info,int batch_size, int head_num, int block_size,int block_num, int head_size,std::map<std::string,float>& info, bool kernel_fusion){
+    auto start_time = std::chrono::system_clock::now();
+    float scaled_factor = (1/sqrt(head_size));
+    if(kernel_fusion){
+        add_bias_and_transpose<<<dim3(head_num,block_num),dim3(32,4)>>>(reinterpret_cast<half*>(input_data.data_ptr()),reinterpret_cast<half*>(bias.data_ptr()),reinterpret_cast<half*>(q.data_ptr()),reinterpret_cast<half*>(k.data_ptr()),reinterpret_cast<half*>(v.data_ptr()),q_offset,k_offset,v_offset,seq_len_info,batch_size,head_num,block_size,head_size,block_num,__float2half(scaled_factor));
+    }
+    else{
+        input_data += bias;
+        q = input_data.index({"...",torch::indexing::Slice(0,768)}).reshape({block_num,64,12,64}).permute({2,0,1,3}).contiguous()*scaled_factor;
+        k = input_data.index({"...",torch::indexing::Slice(768,768*2)}).reshape({block_num,64,12,64}).permute({2,0,1,3}).contiguous();
+        v = input_data.index({"...",torch::indexing::Slice(768*2,768*3)}).reshape({block_num,64,12,64}).permute({2,0,1,3}).contiguous();
+    }
+
+
+
+    auto end_time = std::chrono::system_clock::now();
+    if(info.find("add_bias_and_transpose_kernel") != info.end())
+    {    
+        auto dura = (std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time)).count();
+        info["add_bias_and_transpose_kernel"] += dura;
+    }
+}
+
 void test_add_bias_and_transpose(half *bias,half *input_data,half *q, half *k,half *v, int q_offset, int k_offset, int v_offset,int *seq_len_info,int batch_size, int head_num, int block_size,int block_num, int head_size){
         // cudaEvent_t start,stop;
         // cudaEventCreate( &start );
         // cudaEventCreate( &stop ) ;
         // cudaEventRecord( start, 0 ) ;
-        add_bias_and_transpose<<<dim3(head_num,block_num),dim3(32,4)>>>(input_data,bias,q,k,v,q_offset,k_offset,v_offset,seq_len_info,batch_size,head_num,block_size,head_size,block_num);
+        add_bias_and_transpose<<<dim3(head_num,block_num),dim3(32,4)>>>(input_data,bias,q,k,v,q_offset,k_offset,v_offset,seq_len_info,batch_size,head_num,block_size,head_size,block_num,__float2half(float(1.0)));
         // cudaEventRecord(stop,0);
         // float elapsedTime;
         // cudaEventSynchronize(stop);

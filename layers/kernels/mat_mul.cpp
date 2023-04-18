@@ -9,16 +9,13 @@ namespace kernels {
     void MatMul(const torch::Tensor& A, bool a_trans, const torch::Tensor& B,
         bool b_trans, float alpha, torch::Tensor& out, float beta,const cublasHandle_t headle_, const std::string name)
     {
-        nvtxRangePushA("1111");
         int a_cols = A.sizes()[A.sizes().size() - 1];
         int a_rows = A.numel() / a_cols;
         int b_cols = B.sizes()[B.sizes().size() - 1];
         int b_rows = B.numel() / b_cols;
-        nvtxRangePop();
 
         // printf("%d %d %d %d\n",a_cols,a_rows,b_cols,b_rows);
 
-        nvtxRangePushA("2222");
 
         
         int M = a_trans ? a_cols : a_rows;
@@ -26,7 +23,6 @@ namespace kernels {
         
         int K_a = a_trans ? a_rows : a_cols;
         int K_b = b_trans ? b_cols : b_rows;
-        nvtxRangePop();
 
         // ENFORCE_EQ(K_a, K_b, "matrix shape mismatch %d vs %d", K_a, K_b);
 
@@ -57,10 +53,12 @@ namespace kernels {
                 printf("CUDA runtime error\n");
                 exit(0);
             }
+
             if(A.dtype() == torch::kFloat){
-                nvtxRangePushA("cublasGemmEx");
-                if(cublasGemmEx(headle_, transB, transA, N, M, K_a, &alpha,
-                reinterpret_cast<float*>(B.data_ptr()), CUDA_R_32F, ldb, reinterpret_cast<float*>(A.data_ptr()), CUDA_R_32F, lda,&beta, reinterpret_cast<float*>(out.data_ptr()), CUDA_R_32F, ldc, CUDA_R_32F, cublas_algo) != CUBLAS_STATUS_SUCCESS){
+                auto result = cublasGemmEx(headle_, transB, transA, N, M, K_a, &alpha,
+                reinterpret_cast<float*>(B.data_ptr()), CUDA_R_32F, ldb, reinterpret_cast<float*>(A.data_ptr()), CUDA_R_32F, lda,&beta, reinterpret_cast<float*>(out.data_ptr()), CUDA_R_32F, ldc, CUDA_R_32F, cublas_algo);
+                if (result != CUBLAS_STATUS_SUCCESS){
+                    std::cout<<result<<std::endl;
                     std::cout<<A.sizes()<<std::endl;
                     std::cout<<B.sizes()<<std::endl;
                     std::cout<<out.sizes()<<std::endl;
@@ -70,14 +68,14 @@ namespace kernels {
                     printf("CUDA runtime error\n");
                     exit(0);
                 }
-                nvtxRangePop();
             }
             else if(A.dtype() == torch::kHalf){
-                nvtxRangePushA("cublasGemmEx");
                 half alpha_h = __float2half(alpha);
                 half beta_h = __float2half(beta);
 
-                if(cublasGemmEx(headle_, transB, transA, N, M, K_a, &alpha_h,reinterpret_cast<half*>(B.data_ptr()), CUDA_R_16F, ldb, reinterpret_cast<half*>(A.data_ptr()), CUDA_R_16F, lda,&beta_h, reinterpret_cast<half*>(out.data_ptr()), CUDA_R_16F, ldc, CUBLAS_COMPUTE_16F, cublas_algo) != CUBLAS_STATUS_SUCCESS){
+                auto result = cublasGemmEx(headle_, transB, transA, N, M, K_a, &alpha_h,reinterpret_cast<half*>(B.data_ptr()), CUDA_R_16F, ldb, reinterpret_cast<half*>(A.data_ptr()), CUDA_R_16F, lda,&beta_h, reinterpret_cast<half*>(out.data_ptr()), CUDA_R_16F, ldc, CUBLAS_COMPUTE_16F, cublas_algo);
+                if (result != CUBLAS_STATUS_SUCCESS){
+                    std::cout<<result<<std::endl;
                     std::cout<<name<<std::endl;
                     std::cout<<A.sizes()<<std::endl;
                     std::cout<<B.sizes()<<std::endl;
@@ -88,7 +86,6 @@ namespace kernels {
                     printf("CUDA runtime error\n");
                     exit(0);
                 }
-                nvtxRangePop();
             }
 
             if(cublasSetMathMode(headle_, CUBLAS_DEFAULT_MATH) != CUBLAS_STATUS_SUCCESS){

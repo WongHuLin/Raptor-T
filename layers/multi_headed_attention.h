@@ -40,7 +40,7 @@ public:
                        torch::Tensor q_weight, torch::Tensor q_bias,
                        torch::Tensor dense_weight, torch::Tensor dense_bias,
                        torch::Tensor qkv_weight, torch::Tensor qkv_bias,
-                       int64_t num_attention_heads)
+                       int64_t num_attention_heads, bool async)
       : k_weight_(std::move(k_weight)),  //(768, 768)
         k_bias_(std::move(k_bias)),
         v_weight_(std::move(v_weight)),  //(768, 768)
@@ -53,15 +53,20 @@ public:
         qkv_bias_(std::move(qkv_bias)),
         layernorm_gamma_(torch::empty(0)),
         layernorm_beta_(torch::empty(0)),
-        num_attention_heads_(num_attention_heads) {
+        num_attention_heads_(num_attention_heads)
+        {
             sparse_index = false;
             tensor_set = TensorSet::get_instance();
             semaphore = Semaphore::get_instance();
             cublasCreate(&handle_);
             to_select_index_tensor = torch::empty({622},torch::kInt).to(torch::kCUDA).contiguous();
             to_select_index_position_tensor = torch::empty({65},torch::kInt).to(torch::kCUDA).contiguous();
-            thread_ =  std::async(std::launch::async,&MultiHeadedAttention::GenerateSparseBlockIndex,this);
-            std::cout<<"init"<<std::endl;
+            async_ = async;
+            if(async)
+              thread_ =  std::async(std::launch::async,&MultiHeadedAttention::GenerateSparseBlockIndex,this);
+            layer_norm = torch::nn::LayerNorm(torch::nn::LayerNormOptions({768}).elementwise_affine(true).eps(1e-5));
+           layer_norm ->to(torch::kCUDA);
+            // std::cout<<"init"<<std::endl;
   }
     
     MultiHeadedAttention(torch::Tensor k_weight, torch::Tensor k_bias,
@@ -71,7 +76,7 @@ public:
                          torch::Tensor qkv_weight, torch::Tensor qkv_bias,
                          torch::Tensor layernorm_gamma,
                          torch::Tensor layernorm_beta,
-                         int64_t num_attention_heads, int layer_idx)
+                         int64_t num_attention_heads, int layer_idx, bool async)
         : k_weight_(std::move(k_weight)),  //(768, 768)
           k_bias_(std::move(k_bias)),
           v_weight_(std::move(v_weight)),  //(768, 768)
@@ -85,7 +90,8 @@ public:
           layernorm_gamma_(std::move(layernorm_gamma)),
           layernorm_beta_(std::move(layernorm_beta)),
           num_attention_heads_(num_attention_heads),
-          layer_idx_(layer_idx){
+          layer_idx_(layer_idx)
+          {
             sparse_index = false;
             tensor_set = TensorSet::get_instance();
             semaphore = Semaphore::get_instance();
@@ -93,8 +99,14 @@ public:
             cublasCreate(&handle_);
             to_select_index_tensor = torch::empty({622},torch::kInt).to(torch::kCUDA).contiguous();
             to_select_index_position_tensor = torch::empty({65},torch::kInt).to(torch::kCUDA).contiguous();
-            thread_ =  std::async(std::launch::async,&MultiHeadedAttention::GenerateSparseBlockIndex,this);
-
+            if(async)
+              thread_ =  std::async(std::launch::async,&MultiHeadedAttention::GenerateSparseBlockIndex,this);
+            async_ = async;
+            layer_norm = torch::nn::LayerNorm(torch::nn::LayerNormOptions({768}).elementwise_affine(true).eps(1e-5));
+            layer_norm->to(torch::kCUDA);
+            for (auto& p : layer_norm->parameters()) {
+                p.set_data(p.data().to(torch::kHalf));
+            }
     }
 
     ~MultiHeadedAttention(){
@@ -116,13 +128,13 @@ public:
 
     void FuseGemm012AddBIasTranspose(
     const torch::Tensor& input_tensor, torch::Tensor& q_out, 
-    torch::Tensor& k_out, torch::Tensor& v_out, torch::Tensor &seq_len_info_tensor, int total_seq_len, int d_num) const;
+    torch::Tensor& k_out, torch::Tensor& v_out, torch::Tensor &seq_len_info_tensor, int total_seq_len, int d_num,std::map<std::string,float> &info, bool kernel_fusion) const;
     
     void operator()(
     const torch::Tensor& input_tensor, const torch::Tensor attention_mask,
     const std::string attn_type, torch::Tensor &output, torch::Tensor att_score,
     const std::vector<int> seq_len_info,torch::Tensor &seq_len_info_tensor, const int block_limit, const int head_size, const int block_size, const int d_num, const torch::Tensor &from_select_index_position_tensor,
-    const torch::Tensor &from_select_index_tensor ) const ;
+    const torch::Tensor &from_select_index_tensor,std::map<std::string,float> &info, bool kernel_fusion, bool balanced) const ;
 
 private:
     torch::Tensor k_weight_;
@@ -164,6 +176,10 @@ private:
     Semaphore::Ptr semaphore;
     std::future<void> thread_;
     int layer_idx_;
+    bool async_;
+
+    mutable torch::nn::LayerNorm layer_norm = nullptr;
+
 };
 
 }  // namespace layers

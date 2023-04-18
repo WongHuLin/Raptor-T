@@ -14,9 +14,12 @@ std::condition_variable cr;
 std::mutex mtx;
 void MultiHeadedAttention::GenerateSparseBlockIndex() const{
     while(true){
-        semaphore->Wait(layer_idx_);
-        if(semaphore->get_terminate_single()){
-            break;
+        if(async_)
+        {
+            semaphore->Wait(layer_idx_);
+            if(semaphore->get_terminate_single()){
+                break;
+            }
         }
 
         std::vector<int> seq_len_info = tensor_set->seq_len_info_;
@@ -121,17 +124,17 @@ void MultiHeadedAttention::GenerateSparseBlockIndex() const{
             select_block_position_index.push_back(select_index.size());
         }
         }
-        cudaMemcpy(reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),select_index.data(),sizeof(int)*select_index.size(),cudaMemcpyHostToDevice);
-        cudaMemcpy(reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),select_block_position_index.data(),sizeof(int)*select_block_position_index.size(),cudaMemcpyHostToDevice);
+        // cudaMemcpy(reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),select_index.data(),sizeof(int)*select_index.size(),cudaMemcpyHostToDevice);
+        // cudaMemcpy(reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),select_block_position_index.data(),sizeof(int)*select_block_position_index.size(),cudaMemcpyHostToDevice);
 
 
-        // select_index_tensor = torch::from_blob(select_index.data(),{int(select_index.size())},
-        // at::TensorOptions().dtype(torch::kInt)).clone().to(at::kCUDA);
-        // select_index_position_tensor = torch::from_blob(select_block_position_index.data(),
-        // {int(select_block_position_index.size())},at::TensorOptions().dtype(torch::kInt)).clone().to(at::kCUDA);
+        to_select_index_tensor = torch::from_blob(select_index.data(),{int(select_index.size())},at::TensorOptions().dtype(torch::kInt)).to(at::kCUDA);
+        to_select_index_position_tensor = torch::from_blob(select_block_position_index.data(),{int(select_block_position_index.size())},at::TensorOptions().dtype(torch::kInt)).to(at::kCUDA);
         this->sparse_index = true;
-
-        cr.notify_all();
+        if(async_)
+            cr.notify_all();
+        else
+            break;
     }
     
 }
@@ -139,24 +142,12 @@ void MultiHeadedAttention::GenerateSparseBlockIndex() const{
 
 void MultiHeadedAttention::FuseGemm012AddBIasTranspose(
     const torch::Tensor& input_tensor, torch::Tensor& q_out, 
-    torch::Tensor& k_out, torch::Tensor& v_out, torch::Tensor &seq_len_info_tensor, int total_seq_len, int d_num) const{
-    nvtxRangePushA("FuseGemm012AddBIasTranspose_tmp_qkv_out1");
+    torch::Tensor& k_out, torch::Tensor& v_out, torch::Tensor &seq_len_info_tensor, int total_seq_len, int d_num,std::map<std::string,float> &info, bool kernel_fusion) const{
     torch::Tensor tmp_qkv_out1 = tensor_set->get_tensor("tmp_qkv_out1");
-    nvtxRangePop();
-    // std::cout<<"FuseGemm012AddBIasTranspose"<<std::endl;
-    // std::cout<<input_tensor.sizes()<<std::endl;
-    // std::cout<<qkv_weight_.sizes()<<std::endl;
-    // std::cout<<tmp_qkv_out1.sizes()<<std::endl;
-    nvtxRangePushA("FuseGemm012AddBIasTranspose_MatMul");
     kernels::MatMul(input_tensor,false,qkv_weight_,false,1,tmp_qkv_out1,0,handle_,"FuseGemm012AddBIasTranspose_MatMul");
-    nvtxRangePop();
-    nvtxRangePushA("FuseGemm012AddBIasTranspose_add_bias");
-    if(qkv_bias_.dtype() == torch::kFloat)
-        kernels::test_add_bias_and_transpose(reinterpret_cast<float*>(qkv_bias_.data_ptr()),reinterpret_cast<float*>(tmp_qkv_out1.data_ptr()),reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),0,d_num,d_num*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),batch_size_,head_num_,block_size_,block_num_,head_size_);
-    else{
-        kernels::test_add_bias_and_transpose(reinterpret_cast<half*>(qkv_bias_.data_ptr()),reinterpret_cast<half*>(tmp_qkv_out1.data_ptr()),reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),0,d_num,d_num*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),batch_size_,head_num_,block_size_,block_num_,head_size_);
-    }
-    nvtxRangePop();
+
+    kernels::add_bias_and_transpose_kernel(qkv_bias_,tmp_qkv_out1,q_out,k_out,v_out,0,d_num,d_num*2,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),batch_size_,head_num_,block_size_,block_num_,head_size_,info,kernel_fusion);
+
 
 }
 
@@ -164,9 +155,8 @@ void MultiHeadedAttention::operator()(
     const torch::Tensor& input_tensor, const torch::Tensor attention_mask,
     const std::string attn_type, torch::Tensor &output, torch::Tensor att_score,
     const std::vector<int> seq_len_info,torch::Tensor &seq_len_info_tensor, const int block_limit, const int head_size, const int block_size, const int d_num, const torch::Tensor &from_select_index_position_tensor,
-    const torch::Tensor &from_select_index_tensor ) const {
+    const torch::Tensor &from_select_index_tensor,std::map<std::string,float> &info, bool kernel_fusion, bool balanced) const {
 
-    // std::cout<<seq_len_info<<std::endl;
     total_seq_len_ = seq_len_info.back()*block_size;
     batch_size_ = seq_len_info.size()-1;
     head_num_ = d_num/head_size;
@@ -175,80 +165,52 @@ void MultiHeadedAttention::operator()(
     head_size_ = head_size;
     block_num_ =  seq_len_info.back();
 
-    // torch::Tensor to_select_index_tensor = tensor_set->get_tensor("to_select_index_tensor");
-    // torch::Tensor to_select_index_position_tensor = tensor_set->get_tensor("to_select_index_position_tensor");
-    
-    // std::thread t1(&layers::MultiHeadedAttention::GenerateSparseBlockIndex,this,
-    // std::ref(to_select_index_tensor),std::ref(to_select_index_position_tensor),seq_len_info,
-    // total_seq_len_,block_size,3);
-    // // td::thread t1(&MultiHeadedAttention::GenerateSparseBlockIndex,this,111);
-    // t1.detach();
 
-    // auto a3 = std::async(std::launch::async,&layers::MultiHeadedAttention::GenerateSparseBlockIndex,this,
-    // std::ref(to_select_index_tensor),std::ref(to_select_index_position_tensor),seq_len_info,
-    // total_seq_len_,block_size,3);
 
-    nvtxRangePushA("q_out");
     torch::Tensor q_out = tensor_set->get_tensor("q_out");
     torch::Tensor k_out = tensor_set->get_tensor("k_out");
     torch::Tensor v_out = tensor_set->get_tensor("v_out");
-    nvtxRangePop();
 
 
-    nvtxRangePushA("FuseGemm012AddBIasTranspose");
-    FuseGemm012AddBIasTranspose(input_tensor,q_out,k_out,v_out,seq_len_info_tensor,total_seq_len_,d_num_);
-    nvtxRangePop();
-    
-    // std::cout<<"current "<<layer_idx_<<" "<<sparse_index<<std::endl;
+    FuseGemm012AddBIasTranspose(input_tensor,q_out,k_out,v_out,seq_len_info_tensor,total_seq_len_,d_num_,info,kernel_fusion);
 
-    // std::cout<<1<<std::endl;
-    while(!sparse_index){
-        // std::cout<<"before "<<layer_idx_<<" "<<sparse_index<<std::endl;
-        std::unique_lock<std::mutex> lck(mtx);
-        cr.wait(lck);
-        // std::cout<<"after "<<layer_idx_<<" "<<sparse_index<<std::endl;
+    auto start_time = std::chrono::system_clock::now();
+
+    if(async_){
+        while(!sparse_index){
+            std::unique_lock<std::mutex> lck(mtx);
+            cr.wait(lck);
+        }
+        sparse_index = false;
     }
-    
-    
+    else{
+        GenerateSparseBlockIndex();
+    }
+    auto end_time = std::chrono::system_clock::now();
+    if(info.find("pre_process") != info.end())
+    {    auto dura = (std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time)).count();
+        info["pre_process"] += dura;
+    }
 
-    sparse_index = false;
-
-    // std::cout<<partition_part_index_tensor<<std::endl;
-    // std::cout<<partition_part_tensor<<std::endl;
-    // std::cout<<select_index_tensor<<std::endl;
-    // std::cout<<select_index_position_tensor<<std::endl;
-    nvtxRangePushA("test_gemm_1");
     torch::Tensor attention_out = tensor_set->get_tensor("attention_out");
+    
+
     if(attention_out.dtype() == torch::kFloat)
         kernels::test_gemm_1(reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),reinterpret_cast<float*>(attention_out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),block_limit,block_num_,head_num_,block_size,head_size);
     else{
-        kernels::test_gemm_1(reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),reinterpret_cast<half*>(attention_out.data_ptr()),reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),block_limit,block_num_,head_num_,block_size,head_size);
+        kernels::test_gemm_1(reinterpret_cast<half*>(q_out.data_ptr()),reinterpret_cast<half*>(k_out.data_ptr()),reinterpret_cast<half*>(v_out.data_ptr()),reinterpret_cast<half*>(attention_out.data_ptr()),batch_size_,reinterpret_cast<int*>(seq_len_info_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_tensor.data_ptr()),reinterpret_cast<int*>(from_select_index_position_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_tensor.data_ptr()),reinterpret_cast<int*>(to_select_index_position_tensor.data_ptr()),block_limit,block_num_,head_num_,block_size,head_size,info,balanced);
     }
 
-    // std::cout<<2<<std::endl;
-    nvtxRangePop();
-
-    // std::cout<<"Attention Output"<<std::endl;
-    // std::cout<<attention_out.sizes()<<std::endl;
-    // std::cout<<dense_weight_.sizes()<<std::endl;
-    // std::cout<<output.sizes()<<std::endl;
-
-    nvtxRangePushA("MatMul");
+    // std::cout<<attention_out.min()<<attention_out.max()<<std::endl;
 
     kernels::MatMul(attention_out,false,dense_weight_,false,1,output,0,handle_,"Attention Output");
 
-    // std::cout<<3<<std::endl;
-    nvtxRangePop();
 
-    nvtxRangePushA("test_add_bias_and_layernorm");
 
-    //layernorm
-    if(dense_bias_.dtype() == torch::kFloat)
-        kernels::test_add_bias_and_layernorm(reinterpret_cast<float*>(output.data_ptr()),reinterpret_cast<float*>(output.data_ptr()),reinterpret_cast<float*>(dense_bias_.data_ptr()),total_seq_len_,2,d_num_,float(1e-5),reinterpret_cast<float*>(layernorm_gamma_.data_ptr()),reinterpret_cast<float*>(layernorm_beta_.data_ptr()));
-    else{
-        kernels::test_add_bias_and_layernorm(reinterpret_cast<half*>(output.data_ptr()),reinterpret_cast<half*>(output.data_ptr()),reinterpret_cast<half*>(dense_bias_.data_ptr()),total_seq_len_,2,d_num_,float(1e-5),reinterpret_cast<half*>(layernorm_gamma_.data_ptr()),reinterpret_cast<half*>(layernorm_beta_.data_ptr()));
-    }
-    nvtxRangePop();
+    kernels::add_bias_and_layernorm_kernel(output,input_tensor,dense_bias_,total_seq_len_,2,d_num_,float(1e-5),layernorm_gamma_,layernorm_beta_,layer_norm,info,kernel_fusion);
+
+    // std::cout<<output.min()<<output.max()<<std::endl;
+    // std::cout<<torch::mean(output)<<std::endl;
 
 
     }       

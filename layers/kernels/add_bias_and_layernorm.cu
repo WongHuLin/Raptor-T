@@ -8,6 +8,7 @@
 #include <thrust/extrema.h>
 // #include <cub/cub.cuh>
 #define FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
+#define FLOAT2(pointer) (reinterpret_cast<float2*>(&(pointer))[0])
 #define FLOAT(pointer) (reinterpret_cast<float*>(&(pointer)))
 #define HALF(pointer) (reinterpret_cast<half*>(&(pointer)))
 #define HALF2(pointer) (reinterpret_cast<half2*>(&(pointer)))
@@ -232,12 +233,10 @@ __global__ void add_bias_and_layernorm_half(half *out_data, half *input_data,
             temp_h2 = __hadd2(__hadd2(HALF2(data[0])[i],HALF2(data[1])[i]),HALF2(data[2])[i]);
             temp1_h2 = __hadd2(__hadd2(__hmul2(HALF2(data[0])[i],HALF2(data[0])[i]), __hmul2(HALF2(data[1])[i],HALF2(data[1])[i])),__hmul2(HALF2(data[2])[i],HALF2(data[2])[i]));
 
-            temp_f += __half2float(__hadd(HALF(temp_f)[0], HALF(temp_f)[1]));
+            temp_f += __half2float(__hadd(HALF(temp_h2)[0], HALF(temp_h2)[1]));
             temp1_f += __half2float(__hadd(HALF(temp1_h2)[0], HALF(temp1_h2)[1]));
 
         }
-        // if(bidx == 0 && bidy == 0)
-        //     printf("%f %f \n",sum[0],sum[1]);
 
         __shared__ float sum_temp_smem[2][4];
 
@@ -249,11 +248,8 @@ __global__ void add_bias_and_layernorm_half(half *out_data, half *input_data,
         temp1_f = sum_temp_smem[1][tidy]/normalized_len-temp_f*temp_f+eps;
 
         mean = __half2half2(__float2half(temp_f));
-        var = __half2half2(__float2half(temp1_f));
+        var = __half2half2(__float2half(sqrt(temp1_f)));
 
-        // if(bidx == 0 && bidy == 0 && tidx == 0 && tidy ==0 )
-        //     printf("%f %f %f %f\n",mean[0],mean[1],var[0],var[1]);
-        
     }
     for(int i=0;i<4;i++){
 
@@ -263,12 +259,29 @@ __global__ void add_bias_and_layernorm_half(half *out_data, half *input_data,
 
     }
 
-    __syncthreads();
-
     for(int i=0;i<3;i++){
         FLOAT4(out_data[bidx*handle_row*normalized_len + tidy*normalized_len + tidx*24 + i*8]) = data[i];
     }
 
+}
+
+void add_bias_and_layernorm_kernel(torch::Tensor &out,const torch::Tensor &input_data,const torch::Tensor &bias,int seq_len, int handle_row, int normalized_len, float eps,const torch::Tensor &layernorm_weight,const torch::Tensor &layernorm_bias,torch::nn::LayerNorm& layernorm,std::map<std::string,float> &info, bool kernel_fusion){
+
+    auto start_time = std::chrono::system_clock::now();
+
+    if(kernel_fusion)
+    {
+        add_bias_and_layernorm_half<<<dim3(seq_len/4),dim3(32,4)>>>(reinterpret_cast<half*>(out.data_ptr()),reinterpret_cast<half*>(input_data.data_ptr()),reinterpret_cast<half*>(bias.data_ptr()),seq_len,4,normalized_len,eps,reinterpret_cast<half*>(layernorm_weight.data_ptr()),reinterpret_cast<half*>(layernorm_bias.data_ptr()));
+    }
+    else{
+        out += input_data + bias;
+        out = layernorm(out);
+    }
+    auto end_time = std::chrono::system_clock::now();
+    if(info.find("add_bias_and_layernorm_kernel") != info.end())
+    {auto dura = (std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time)).count();
+        info["add_bias_and_layernorm_kernel"] += dura;
+    }
 }
 
 void test_add_bias_and_layernorm(float *out,float *input_data, float *bias,int seq_len, int handle_row, int normalized_len, float eps,float* layernorm_weight,float* layernorm_bias){

@@ -6,7 +6,7 @@
 #include <mutex>  // mutex
 #include <vector>
 
-#include<boost/enable_shared_from_this.hpp>
+// #include<boost/enable_shared_from_this.hpp>
 
 namespace sparse_transformers{
 namespace layers{
