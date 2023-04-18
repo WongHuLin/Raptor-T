@@ -1,0 +1,3 @@
+[submodule "FastTransformer"]
+	path = FastTransformer
+	url = git@github.com:NVIDIA/FasterTransformer.git
