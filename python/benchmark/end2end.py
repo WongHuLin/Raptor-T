@@ -155,7 +155,7 @@ def end2end(args):
 
     elif model_name == 'fasttransformer':
         model_dir = "/home/wong/TurboTransformers/FasterTransformer/examples/pytorch/longformer/longformer-base-4096"
-        ft_longformer_lib = "/home/wong/TurboTransformers/FasterTransformer/build/lib/libth_transformer.so"
+        ft_longformer_lib = "../..//FasterTransformer/build/lib/libth_transformer.so"
         max_global_token_num = 128
         data_type = 'fp16'
 

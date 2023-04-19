@@ -278,26 +278,26 @@ class SequencePool():
         # super(SequencePool, self).__call__(input_tensor, output_tensor)
         return output_tensor
 
-class BertPooler(cxx.BertPooler):
-    def __call__(self,
-                 input_tensor: torch.Tensor,
-                 output: Optional[torch.Tensor] = None):
-        input_tensor = input_tensor
-        output = create_empty_if_none(output)
-        super(BertPooler, self).__call__(input_tensor, output)
-        return output
+# class BertPooler(cxx.BertPooler):
+#     def __call__(self,
+#                  input_tensor: torch.Tensor,
+#                  output: Optional[torch.Tensor] = None):
+#         input_tensor = input_tensor
+#         output = create_empty_if_none(output)
+#         super(BertPooler, self).__call__(input_tensor, output)
+#         return output
 
-    @staticmethod
-    def from_torch(pooler: TorchBertPooler,bigbird:bool = True):
-        pooler_params = to_param_dict(pooler)
-        if bigbird:
-            weight = torch.clone(
-            torch.t(pooler_params['weight']).contiguous())
-            return BertPooler(weight, pooler_params['bias'])
+#     @staticmethod
+#     def from_torch(pooler: TorchBertPooler,bigbird:bool = True):
+#         pooler_params = to_param_dict(pooler)
+#         if bigbird:
+#             weight = torch.clone(
+#             torch.t(pooler_params['weight']).contiguous())
+#             return BertPooler(weight, pooler_params['bias'])
         
-        weight = torch.clone(
-            torch.t(pooler_params['dense.weight']).contiguous())
-        return BertPooler(weight, pooler_params['dense.bias'])
+#         weight = torch.clone(
+#             torch.t(pooler_params['dense.weight']).contiguous())
+#         return BertPooler(weight, pooler_params['dense.bias'])
 
 class PoolingType(enum.Enum):
     FIRST = "First"
