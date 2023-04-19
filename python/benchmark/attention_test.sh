@@ -5,7 +5,7 @@ balanceds=(true false)
 
 models=("raptor_t" "pytorch")
 
-gpu_card=0
+gpu_card=1
 export CUDA_VISIBLE_DEVICES=${gpu_card}
 
 source /home/wong/miniconda3/bin/activate transformer

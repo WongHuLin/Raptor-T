@@ -50,10 +50,11 @@ def end2end(args):
 
     total_time = datetime.timedelta()
 
+    bigbird_dir = args.bigbird_dir
 
     if model_name == 'raptor_t':
         block_size = 64
-        model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device).half()
+        model = BigBirdModel.from_pretrained(bigbird_dir).to(device).half()
         bertModel = BertModelNoPooler.from_torch(model)
         metadata = cxx.MetaData()
         if thread_block_limit == 0 and batch_size == 1:
@@ -89,7 +90,7 @@ def end2end(args):
         metadata.terminate_thread()
 
     elif model_name == "pytorch":
-        model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device).half()
+        model = BigBirdModel.from_pretrained(bigbird_dir).to(device).half()
         config = model.config
         seqlens = torch.tensor(seq_lens,dtype=torch.int,device = device)
         attention_mask = torch.arange(max_seqlen, device='cuda')[None, :] < seqlens[:, None]
@@ -109,14 +110,13 @@ def end2end(args):
                 total_time += end - begin
 
     elif model_name == 'flash_attn':
-        model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device)
+        model = BigBirdModel.from_pretrained(bigbird_dir).to(device)
         config = model.config
         config.hidden_act = "gelu_new"
         config.use_flash_attn = True
         config.fused_bias_fc = False
         config.fused_mlp = False
         config.fused_dropout_add_ln = False
-        pretrained_state_dict = remap_state_dict(state_dict_from_pretrained("google/bigbird-roberta-base"), config)
         model = BertForPreTraining.from_pretrained("google/bigbird-roberta-base",config).cuda().to(dtype=torch.float16)
 
         model.eval()
@@ -134,9 +134,8 @@ def end2end(args):
                 total_time += end - begin
 
     elif model_name == 'bert_like':
-        model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device)
+        model = BigBirdModel.from_pretrained(bigbird_dir).to(device)
         config = model.config
-        pretrained_state_dict = remap_state_dict(state_dict_from_pretrained("google/bigbird-roberta-base"), config)
         model = BertForPreTraining.from_pretrained("google/bigbird-roberta-base",config).cuda().to(dtype=torch.float16)
 
         model.eval()
@@ -154,8 +153,8 @@ def end2end(args):
                 total_time += end - begin
 
     elif model_name == 'fasttransformer':
-        model_dir = "/home/wong/TurboTransformers/FasterTransformer/examples/pytorch/longformer/longformer-base-4096"
-        ft_longformer_lib = "../..//FasterTransformer/build/lib/libth_transformer.so"
+        model_dir = args.longformer
+        ft_longformer_lib = args.ft_longformer_lib
         max_global_token_num = 128
         data_type = 'fp16'
 

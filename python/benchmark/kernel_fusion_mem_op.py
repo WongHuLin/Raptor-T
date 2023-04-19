@@ -40,10 +40,10 @@ def kernel_fusion_mem_op(args):
     max_seqlen = min(4096,max_seqlen)
     seq_lens = generate_array_with_avg(seq_len,batch_size,max_seqlen)
 
-
+    bigbird_dir = args.bigbird_dir
 
     block_size = 64
-    model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device).half()
+    model = BigBirdModel.from_pretrained(bigbird_dir).to(device).half()
     bertModel = BertModelNoPooler.from_torch(model)
     metadata = cxx.MetaData()
     if thread_block_limit == 0 and batch_size == 1:

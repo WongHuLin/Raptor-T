@@ -45,11 +45,12 @@ def async_(args):
 
     total_time = datetime.timedelta()
 
+    bigbird_dir = args.bigbird_dir
 
 
     if model_name == 'raptor_t':
         block_size = 64
-        model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device).half()
+        model = BigBirdModel.from_pretrained(bigbird_dir).to(device).half()
         bertModel = BertModelNoPooler.from_torch(model,async_)
         metadata = cxx.MetaData()
         if thread_block_limit == 0 and batch_size == 1:
@@ -89,7 +90,7 @@ def async_(args):
 
 
     elif model_name == "pytorch":
-        model = BigBirdModel.from_pretrained("google/bigbird-roberta-base").to(device).half()
+        model = BigBirdModel.from_pretrained(bigbird_dir).to(device).half()
         config = model.config
         seqlens = torch.tensor(seq_lens,dtype=torch.int,device = device)
         attention_mask = torch.arange(max_seqlen, device='cuda')[None, :] < seqlens[:, None]

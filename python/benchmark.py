@@ -21,7 +21,7 @@ def main():
                         help='The average sequence length to use. Defaults to 2048',
                         default=3840, type=int)
     parser.add_argument('-m', '--model-name', required=False,
-                        default='raptor_t',
+                        default='pytorch',
                         help='model name to launch')
     parser.add_argument('-t', '--thread-block',
                         default=0,type=int,
@@ -39,6 +39,9 @@ def main():
                         default="end2end",type=str,
                         help='benchmark')
     args, _ = parser.parse_known_args()
+    args.bigbird_dir = "/workspace/models/bigbird"
+    args.longformer = "/workspace/models/longformer"
+    args.ft_longformer_lib = "/workspace/FastTransformer/build/lib/libth_transformer.so"
     f = functions[args.benchmark]
     f(args)
 
