@@ -2,7 +2,7 @@ from benchmark.async_ import async_
 from benchmark.attention_test import attention_test
 from benchmark.CTAs_num_test import CTAs_num_test
 from benchmark.end2end import end2end
-from benchmark.kernel_fusion_mem_op import kernel_fusion_mem_op
+from benchmark.mem_bound_op import kernel_fusion_mem_op
 import argparse
 
 

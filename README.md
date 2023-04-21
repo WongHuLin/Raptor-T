@@ -1,29 +1,66 @@
-#### Code
 
-目前kernel实现的代码在  `./Attention/layers/kernels` 目录下面，FMHA的实现是 `sparse_attention_new.cu`文件。
+We run all experiments on NVIDIA A100 GPUs. We use nvidia-docker to run the container on the GPU. Reproducing the artifact is divided into the following 3 main steps.
+~\\
 
-`./Attention/python/benchmark.py` 是测试的 python 代码
+Step 1: Download Source code and run the container.
 
-#### End to end
+git clone --recursive https://github.com/WongHuLin/Raptor-T.git
 
- 的效果如下，我们每一次inference时间是100ms左右。
+cd Raptor-T
 
-![image-20230306221936506](https://raw.githubusercontent.com/WongHuLin/picture/main/202303062219397.png)
+apt-get update \&\& apt-get install git-lfs \&\& git lfs install
+
+mkdir models \&\& cd models
+
+git clone https://huggingface.co/allenai/longformer-base-4096 ./longformer  
+\&\&  git clone  https://huggingface.co/google/bigbird-roberta-base ./bigbird  
+\&\&  cd ..
 
 
+docker build -t raptor\_t:v1.0 .
 
-Flashattn的效果如下，113ms左右：
+nvidia-docker run -it -v \$PWD:/workspace raptor\_t:v1.0 /bin/bash
+~\\
 
-![image-20230306222152082](https://raw.githubusercontent.com/WongHuLin/picture/main/202303062221686.png)
+Step 2: Deploy FlashAttention, FastTransformer and Pytorch
+
+// FlashAttention
+
+pip install flash\_attn==1.0.1 
+~\\
+
+// FashTransformer
+
+cd /workspace/Raptor-T/FastTransformer 
+
+mkdir build \&\& cd build
+
+cmake -DCMAKE\_BUILD\_TYPE=Release -DBUILD\_PYT=ON ..
+
+make -j12
+~\\
+
+// Raptor-T
+
+cd /workspace/Raptor-T/python
+
+python setup.py install
+~\\
+
+// Pytorch
+
+// Replace the modeling\_big\_bird.py file in the Huggingface library with the modeling\_big\_bird.py in the Raptor-T directory.
+~\\
 
 
+Step 3: Run the experiments.
 
-#### Kernel
+bash /workspace/python/benchmark/end2end.sh $\rightarrow$ Figs~\ref{fig:end2end_time}-\ref{fig:end2end_memory}
 
-FHMA 性能对比，我们大概是4.6ms
+bash /workspace/python/benchmark/mem\_bound\_op.sh $\rightarrow$ Fig~\ref{fig:mem_bound_op}
 
-![image-20230306222401620](https://raw.githubusercontent.com/WongHuLin/picture/main/202303062224473.png)
+bash /workspace/python/benchmark/async\_.sh $\rightarrow$ Fig~\ref{fig:asyc_generation}
 
-Flashattn 大概是4.2ms
+bash /workspace/python/benchmark/attention\_test.sh $\rightarrow$ Fig~\ref{fig:attn}
 
-![image-20230306222252253](https://raw.githubusercontent.com/WongHuLin/picture/main/202303062222065.png)
+bash /workspace/python/benchmark/CTAs\_num\_test.sh $\rightarrow$ Fig~\ref{fig:balanced_compute}
