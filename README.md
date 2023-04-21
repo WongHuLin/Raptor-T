@@ -2,7 +2,7 @@
 ### 
 We run all experiments on NVIDIA A100 GPUs. We use nvidia-docker to run the container on the GPU. Reproducing the artifact is divided into the following 3 main steps.
 
-Step 1: Download Source code and run the container.
+**Step 1: Download Source code and run the container.**
 ```bash
 git clone --recursive https://github.com/WongHuLin/Raptor-T.git
 cd Raptor-T
@@ -15,7 +15,7 @@ docker build -t raptor_t:v1.0 .
 nvidia-docker run -it -v $PWD:/workspace raptor_t:v1.0 /bin/bash
 ```
 
-Step 2: Deploy FlashAttention, FastTransformer and Pytorch
+**Step 2: Deploy FlashAttention, FastTransformer, Pytorch and Raptor-T**
 
 FlashAttention
 ```bash
@@ -41,7 +41,7 @@ Pytorch
 Replace the modeling_big_bird.py file in the Huggingface library with the modeling_big_bird.py in the Raptor-T directory.
 ```
 
-Step 3: Run the experiments.
+**Step 3: Run the experiments.**
 
 bash /workspace/python/benchmark/end2end.sh $\rightarrow$ Figs 9-10
 
