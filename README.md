@@ -24,13 +24,13 @@ nvidia-docker run -it -v \$PWD:/workspace raptor\_t:v1.0 /bin/bash
 
 Step 2: Deploy FlashAttention, FastTransformer and Pytorch
 
-// FlashAttention
-
+FlashAttention
+```bash
 pip install flash\_attn==1.0.1 
-~\\
+```
 
-// FashTransformer
-
+FashTransformer
+```bash
 cd /workspace/Raptor-T/FastTransformer 
 
 mkdir build \&\& cd build
@@ -38,23 +38,23 @@ mkdir build \&\& cd build
 cmake -DCMAKE\_BUILD\_TYPE=Release -DBUILD\_PYT=ON ..
 
 make -j12
-~\\
+```
 
 // Raptor-T
-
+```bash
 cd /workspace/Raptor-T/python
 
 python setup.py install
-~\\
+```
 
-// Pytorch
-
-// Replace the modeling\_big\_bird.py file in the Huggingface library with the modeling\_big\_bird.py in the Raptor-T directory.
-~\\
+Pytorch
+```
+Replace the modeling\_big\_bird.py file in the Huggingface library with the modeling\_big\_bird.py in the Raptor-T directory.
+```
 
 
 Step 3: Run the experiments.
-
+```bash
 bash /workspace/python/benchmark/end2end.sh $\rightarrow$ Figs~\ref{fig:end2end_time}-\ref{fig:end2end_memory}
 
 bash /workspace/python/benchmark/mem\_bound\_op.sh $\rightarrow$ Fig~\ref{fig:mem_bound_op}
@@ -64,3 +64,4 @@ bash /workspace/python/benchmark/async\_.sh $\rightarrow$ Fig~\ref{fig:asyc_gene
 bash /workspace/python/benchmark/attention\_test.sh $\rightarrow$ Fig~\ref{fig:attn}
 
 bash /workspace/python/benchmark/CTAs\_num\_test.sh $\rightarrow$ Fig~\ref{fig:balanced_compute}
+```
