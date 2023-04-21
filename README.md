@@ -43,12 +43,12 @@ Replace the modeling_big_bird.py file in the Huggingface library with the modeli
 
 Step 3: Run the experiments.
 
-bash /workspace/python/benchmark/end2end.sh $\rightarrow$ Figs~\ref{fig:end2end_time}-\ref{fig:end2end_memory}
+bash /workspace/python/benchmark/end2end.sh $\rightarrow$ Figs 9-10
 
-bash /workspace/python/benchmark/mem\_bound\_op.sh $\rightarrow$ Fig~\ref{fig:mem_bound_op}
+bash /workspace/python/benchmark/mem\_bound\_op.sh $\rightarrow$ Fig 11
 
-bash /workspace/python/benchmark/async\_.sh $\rightarrow$ Fig~\ref{fig:asyc_generation}
+bash /workspace/python/benchmark/async\_.sh $\rightarrow$ Fig 12
 
-bash /workspace/python/benchmark/attention\_test.sh $\rightarrow$ Fig~\ref{fig:attn}
+bash /workspace/python/benchmark/attention\_test.sh $\rightarrow$ Fig 13
 
-bash /workspace/python/benchmark/CTAs\_num\_test.sh $\rightarrow$ Fig~\ref{fig:balanced_compute}
+bash /workspace/python/benchmark/CTAs\_num\_test.sh $\rightarrow$ Fig 14
