@@ -6,22 +6,24 @@ from benchmark.mem_bound_op import kernel_fusion_mem_op
 import argparse
 
 
-functions = {"async_":async_,
+functions = {
+            "async_":async_,
              "attention_test":attention_test,
              "CTAs_num_test":CTAs_num_test,
              "end2end":end2end,
-             "kernel_fusion_mem_op":kernel_fusion_mem_op}
+             "kernel_fusion_mem_op":kernel_fusion_mem_op
+             }
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-b', '--batch-size',
                         help='Batch size to use.',
-                        default=4, type=int)
+                        default=1, type=int)
     parser.add_argument('-s', '--sequence-length',
                         help='The average sequence length to use. Defaults to 2048',
-                        default=3840, type=int)
+                        default=4096, type=int)
     parser.add_argument('-m', '--model-name', required=False,
-                        default='pytorch',
+                        default='fasttransformer',
                         help='model name to launch')
     parser.add_argument('-t', '--thread-block',
                         default=0,type=int,
@@ -38,10 +40,13 @@ def main():
     parser.add_argument('-be', '--benchmark',
                         default="end2end",type=str,
                         help='benchmark')
+    parser.add_argument('-g', '--gpu-rank',
+                        default=1,type=int,
+                        help='benchmark')
     args, _ = parser.parse_known_args()
-    args.bigbird_dir = "/workspace/models/bigbird"
-    args.longformer = "/workspace/models/longformer"
-    args.ft_longformer_lib = "/workspace/FastTransformer/build/lib/libth_transformer.so"
+    args.bigbird_dir = "/home/wong/test/Raptor-T/models/bigbird"
+    args.longformer = "/home/wong/test/Raptor-T/models/longformer"
+    args.ft_longformer_lib = "/home/wong/test/Raptor-T/FastTransformer/build/lib/libth_transformer.so"
     f = functions[args.benchmark]
     f(args)
 

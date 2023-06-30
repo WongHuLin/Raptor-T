@@ -1,7 +1,6 @@
 #!/bin/bash
-CUDA_VISIBLE_DEVICES=1
-cd /home/wong/TurboTransformers/Attention/python
-source /home/wong/miniconda3/bin/activate transformer
+cd /home/wong/test/Raptor-T/python/benchmark
+source /home/wong/miniconda3/bin/activate cuda12
 # /home/wong/miniconda3/bin/conda activate transformer
-
-python ./async.py -s 3840 -m "raptor_t" -b 4 -a true
+CUDA_VISIBLE_DEVICES=2
+python ../benchmark.py -s 4096 -m "raptor_t" -b 1 -be "attention_test"

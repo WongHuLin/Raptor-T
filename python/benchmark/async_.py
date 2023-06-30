@@ -16,14 +16,14 @@ from transformers import BertModel,BigBirdModel
 
 
 from transformers import BigBirdConfig,BigBirdModel
-from flash_attn.models.bert import BertModel, BertForPreTraining
-from flash_attn.models.bert import remap_state_dict
-from flash_attn.utils.pretrained import state_dict_from_pretrained
+# from flash_attn.models.bert import BertModel, BertForPreTraining
+# from flash_attn.models.bert import remap_state_dict
+# from flash_attn.utils.pretrained import state_dict_from_pretrained
 
 
 from util import generate_parition_plan,generate_data_metainfo,generate_array_with_avg,device,generate_input_data
 
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 

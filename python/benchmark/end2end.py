@@ -44,7 +44,7 @@ def end2end(args):
     seq_lens = generate_array_with_avg(seq_len,batch_size,max_seqlen)
 
     pynvml.nvmlInit()
-    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+    handle = pynvml.nvmlDeviceGetHandleByIndex(args.gpu_rank)
     meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
     before_used_mem = meminfo.used / 1024 /1024
 
@@ -80,6 +80,8 @@ def end2end(args):
         for i in range(3):
             metadata.update_meta_data(total_seq_len,seq_position_info[-1]+1,total_comp_block_num,seq_position_info)
             output,test_info = bertModel(hidden_states, total_seq_len,thread_block_limit, seq_position_info, seq_position_info_tensor,  partition_part_index_tensor,  partition_part_tensor, attention_masks, token_type_ids, position_ids,output_layer_temp,intermediate_temp,attention_output,test_info)
+        # metadata.update_meta_data(total_seq_len,seq_position_info[-1]+1,total_comp_block_num,seq_position_info)
+        # output,test_info = bertModel(hidden_states, total_seq_len,thread_block_limit, seq_position_info, seq_position_info_tensor,  partition_part_index_tensor,  partition_part_tensor, attention_masks, token_type_ids, position_ids,output_layer_temp,intermediate_temp,attention_output,test_info)
 
         for i in range(20):
             metadata.update_meta_data(total_seq_len,seq_position_info[-1]+1,total_comp_block_num,seq_position_info)
@@ -126,6 +128,7 @@ def end2end(args):
         with torch.no_grad():
             for i in range(3):
                 out = model.bert(input_ids, attention_mask=attention_mask)
+        # out = model.bert(input_ids, attention_mask=attention_mask)
 
             for i in range(20):
                 begin = datetime.datetime.now()

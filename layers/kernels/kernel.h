@@ -2,7 +2,6 @@
 #include "cuda_runtime.h"
 #include <cuda_fp16.h>
 #include <torch/torch.h>
-#include <chrono>  
 #include <map>
 #include <string>
 using namespace std::chrono;
@@ -35,6 +34,13 @@ void add_bias_act_kernel(const torch::Tensor &bias, torch::Tensor& out, int tota
 void add_bias_and_transpose_kernel(const torch::Tensor&bias, torch::Tensor &input_data, torch::Tensor &q, torch::Tensor &k, torch::Tensor &v,int q_offset, int k_offset, int v_offset,int *seq_len_info,int batch_size, int head_num, int block_size,int block_num, int head_size,std::map<std::string,float>& info, bool kernel_fusion);
 void add_bias_and_layernorm_kernel(torch::Tensor &out,const torch::Tensor &input_data,const torch::Tensor &bias,int seq_len, int handle_row, int normalized_len, float eps,const torch::Tensor &layernorm_weight,const torch::Tensor &layernorm_bias,torch::nn::LayerNorm& layernorm,std::map<std::string,float> &info, bool kernel_fusion);
 void test_gemm_1(half *a, half *b,half *c, half *out,int batch_size,int *seq_len_info,int *from_select_index,int *from_select_index_position,int *to_select_index,int *to_select_index_position,int block_limit, int block_num, int head_num,int block_size,int head_size,std::map<std::string,float>& info,bool balanced = true);
+void test_wmma(half *a, half *b,half *c);
+void test_thread_group();
+void test_p_c();
+void test_bar_();
+void sparse_attention_test_larunch(half *a, half *b,half *c, half *out,int batch_size,int *seq_len_info,int *from_select_index,int *from_select_index_position,int *to_select_index,int *to_select_index_position, int block_size,int head_size);
+void sparse_attention_lastest_larunch(half *a, half *b,half *c, half *out,int batch_size,int *seq_len_info,int *from_select_index,int *from_select_index_position,int *to_select_index,int *to_select_index_position,int block_limit, int block_num, int head_num,int block_size,int head_size);
+
 }
 }
 }

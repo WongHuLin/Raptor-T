@@ -4,6 +4,7 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 setup(name='raptor_t',
       ext_modules=[CUDAExtension('raptor_t', [
             '../layers/kernels/sparse_attention.cu',
+            # '../layers/kernels/pipeline_mha.cu',
             '../layers/multi_headed_attention.cpp',
             'pybind.cpp','../layers/bert_attention.cpp',
             '../layers/bert_intermediate.cpp',
