@@ -59,7 +59,7 @@ bash /workspace/python/benchmark/CTAs\_num\_test.sh $\rightarrow$ Fig 14
 
 
 ###  Citation
-If you use Eco-Rec in your research, please consider citing our paper:
+If you use Raptor-T in your research, please consider citing our paper:
 ```bash
 @article{wang2024raptor,
   title={Raptor-t: A fused and memory-efficient sparse transformer for long and variable-length sequences},
