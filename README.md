@@ -1,3 +1,6 @@
+# Raptor-t: A fused and memory-efficient sparse transformer for long and variable-length sequences
+
+This repo is for TC 2024 artifacts evaluation.
 
 ### 
 We run all experiments on NVIDIA A100 GPUs. We use nvidia-docker to run the container on the GPU. Reproducing the artifact is divided into the following 3 main steps.
@@ -52,3 +55,19 @@ bash /workspace/python/benchmark/async\_.sh $\rightarrow$ Fig 12
 bash /workspace/python/benchmark/attention\_test.sh $\rightarrow$ Fig 13
 
 bash /workspace/python/benchmark/CTAs\_num\_test.sh $\rightarrow$ Fig 14
+
+
+
+###  Citation
+If you use Eco-Rec in your research, please consider citing our paper:
+```bash
+@article{wang2024raptor,
+  title={Raptor-t: A fused and memory-efficient sparse transformer for long and variable-length sequences},
+  author={Wang, Hulin and Yang, Donglin and Xia, Yaqi and Zhang, Zheng and Wang, Qigang and Fan, Jianping and Zhou, Xiaobo and Cheng, Dazhao},
+  journal={IEEE Transactions on Computers},
+  year={2024},
+  publisher={IEEE}
+}
+
+
+```
